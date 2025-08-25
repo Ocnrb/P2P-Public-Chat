@@ -1,12 +1,14 @@
 <!DOCTYPE html>
-<html lang="pt-PT">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chat Público</title>
+<!-- Enforces HTTPS -->
+<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+<title>Public Chat</title>
 <!-- Tailwind CSS -->
 <script src="https://cdn.tailwindcss.com"></script>
-<!-- Ethers.js Library (versão mais recente e estável) -->
+<!-- Ethers.js Library (stable version) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js" type="application/javascript"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -68,20 +70,18 @@
 
 <!-- Main Chat UI -->
 <div id="chatUI" class="w-full max-w-4xl rounded-xl shadow-2xl flex flex-col h-[90vh] bg-[#1b1b1b] hidden">
-    <!-- O restante da sua UI do chat permanece aqui, sem alterações -->
     <div class="p-6 flex flex-col flex-1 min-h-0">
         <div class="flex justify-between items-start sm:items-center mb-4 gap-4">
             <div class="flex flex-col items-start sm:flex-row sm:items-center gap-2 sm:gap-4 flex-1 min-w-0">
-                <h1 class="text-3xl font-bold text-white flex-shrink-0">Chat Público</h1>
+                <h1 class="text-3xl font-bold text-white flex-shrink-0">Public Chat</h1>
                 <div id="user-info" class="flex items-center space-x-2 bg-[#222] rounded-lg p-2 hidden min-w-0 w-full sm:w-auto">
-                    <span class="text-gray-300 text-sm flex-shrink-0">O seu ID:</span>
+                    <span class="text-gray-300 text-sm flex-shrink-0">Your ID:</span>
                     <span id="user-id" class="font-mono text-cyan-400 text-sm truncate"></span>
                 </div>
             </div>
             <div class="flex items-center gap-4">
                 <div id="status-indicator" class="w-4 h-4 rounded-full bg-yellow-500 animate-pulse flex-shrink-0 mt-2 sm:mt-0"></div>
                 <button id="walletBtn" class="text-gray-400 hover:text-white transition-colors">
-                    <!-- Wallet Icon -->
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
                 </button>
                 <button id="nicknameBtn" class="text-gray-400 hover:text-white transition-colors">
@@ -109,7 +109,7 @@
         <div id="replying-to-container" class="p-3 border-t border-gray-700 hidden">
             <div class="bg-[#2a2a2a] p-2 rounded-lg relative">
                 <div class="border-l-2 border-cyan-400 pl-2">
-                    <div id="replying-to-user" class="font-bold text-sm text-cyan-400">A responder a...</div>
+                    <div id="replying-to-user" class="font-bold text-sm text-cyan-400">Replying to...</div>
                     <div id="replying-to-text" class="text-xs text-gray-300 truncate"></div>
                 </div>
                 <button id="cancel-reply-btn" class="absolute top-1 right-1 text-gray-400 hover:text-white text-xl">&times;</button>
@@ -121,18 +121,18 @@
             <input type="file" id="imageInputFile" accept="image/*" class="hidden">
             
             <div id="attachMenu" class="picker-menu attach-menu hidden">
-                <button id="sendImageBtn">Enviar Imagem</button>
-                <button id="sendFileBtn">Enviar Ficheiro</button>
-                <button id="goLiveBtn">Entrar em Direto</button>
+                <button id="sendImageBtn">Send Image</button>
+                <button id="sendFileBtn">Send File</button>
+                <button id="goLiveBtn">Go Live</button>
             </div>
             <div id="emojiPicker" class="picker-menu emoji-picker hidden"></div>
 
-            <button id="attachBtn" class="input-button" title="Anexar ficheiro">
+            <button id="attachBtn" class="input-button" title="Attach file">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L2.5 13"></path></svg>
             </button>
-            <button id="emojiBtn" class="input-button" title="Inserir emoji">😀</button>
-            <textarea id="messageInput" rows="1" placeholder="Escreva uma mensagem..." class="flex-1 p-3 pr-16 rounded-full focus:outline-none focus:ring-2 focus:ring-cyan-400 resize-none"></textarea>
-            <button id="sendBtn" class="send-button absolute right-2 top-1/2 -translate-y-1/2" title="Enviar mensagem">
+            <button id="emojiBtn" class="input-button" title="Insert emoji">😀</button>
+            <textarea id="messageInput" rows="1" placeholder="Write a message..." class="flex-1 p-3 pr-16 rounded-full focus:outline-none focus:ring-2 focus:ring-cyan-400 resize-none"></textarea>
+            <button id="sendBtn" class="send-button absolute right-2 top-1/2 -translate-y-1/2" title="Send message">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
             </button>
         </div>
@@ -143,57 +143,57 @@
 <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-sm w-full text-gray-300 text-center">
         <div id="loginContent">
-            <h2 class="text-2xl font-bold mb-4 text-white">Bem-vindo ao Chat Público</h2>
-            <p class="mb-6">Para uma identidade persistente, conecte a sua carteira. Caso contrário, pode continuar como convidado com um ID temporário.</p>
+            <h2 class="text-2xl font-bold mb-4 text-white">Welcome to the Public Chat</h2>
+            <p class="mb-6">For a persistent identity, connect your wallet. Otherwise, you can continue as a guest with a temporary ID.</p>
             <button id="connectWalletBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors mb-4 flex items-center justify-center gap-2">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
-                Conectar Carteira
+                Connect Wallet
             </button>
             <button id="guestBtn" class="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-4 rounded-lg transition-colors">
-                Continuar como Convidado
+                Continue as Guest
             </button>
         </div>
         <div id="loadingContent" class="hidden">
              <div class="flex justify-center items-center mb-4">
                 <div class="spinner"></div>
             </div>
-            <p class="text-lg">A conectar à sua carteira...</p>
-            <p class="text-sm text-gray-400 mt-2">Por favor, aprove a conexão na sua Metamask.</p>
+            <p class="text-lg">Connecting...</p>
+            <p class="text-sm text-gray-400 mt-2">Please follow the instructions in your Metamask.</p>
         </div>
     </div>
 </div>
 
 
-<!-- Outros Modais (Nickname, Sobre, etc.) permanecem inalterados -->
+<!-- Other Modals -->
 <div id="nicknameModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-sm w-full text-gray-300">
-        <h2 class="text-2xl font-bold mb-4 text-white">Defina o seu Nickname</h2>
-        <p class="mb-4">Este será exibido para outros utilizadores no chat.</p>
-        <input type="text" id="nicknameInput" class="w-full bg-[#2a2a2a] border border-gray-600 rounded-lg p-2 mb-4 text-white focus:outline-none focus:ring-2 focus:ring-cyan-400" placeholder="Insira o seu nickname...">
+        <h2 class="text-2xl font-bold mb-4 text-white">Set Your Nickname</h2>
+        <p class="mb-4">This will be displayed to other users in the chat.</p>
+        <input type="text" id="nicknameInput" class="w-full bg-[#2a2a2a] border border-gray-600 rounded-lg p-2 mb-4 text-white focus:outline-none focus:ring-2 focus:ring-cyan-400" placeholder="Enter your nickname...">
         <button id="saveNicknameBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-            Guardar
+            Save
         </button>
     </div>
 </div>
 
 <div id="aboutModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
-        <h2 class="text-2xl font-bold mb-4 text-white">Sobre Este Chat</h2>
-        <p class="mb-4">Os dados são transmitidos P2P em tempo real através da rede pub/sub <a href="https://docs.streamr.network/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Streamr</a>.</p>
-        <p class="mb-6">Ao executar a aplicação, cada utilizador torna-se um nó na rede, permitindo que ela escale sem esforço para milhares de utilizadores simultâneos, garantindo uma comunicação segura, à prova de adulteração e resiliente, sem depender de servidores centrais.</p>
+        <h2 class="text-2xl font-bold mb-4 text-white">About This Chat</h2>
+        <p class="mb-4">Data is transmitted P2P in real-time via the <a href="https://docs.streamr.network/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Streamr</a> pub/sub network.</p>
+        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of simultaneous users, uncensored, tamper-proof, and resilient communication without relying on central servers.</p>
         <div class="bg-yellow-900 border-l-4 border-yellow-500 text-yellow-100 p-4 rounded-r-lg">
-            <h3 class="font-bold">Aviso de Segurança</h3>
-            <p>Este é um chat público e não moderado. Tenha cuidado ao descarregar ficheiros de utilizadores desconhecidos, pois podem conter software malicioso.</p>
+            <h3 class="font-bold">Security Warning</h3>
+            <p>This is a public and unmoderated chat. Be cautious when downloading files from unknown users, as they may contain malicious software.</p>
         </div>
         <button id="closeModalBtn" class="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-            Fechar
+            Close
         </button>
     </div>
 </div>
 
 <div id="customAlertModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
-        <h2 id="customAlertTitle" class="text-2xl font-bold mb-4 text-white">Alerta</h2>
+        <h2 id="customAlertTitle" class="text-2xl font-bold mb-4 text-white">Alert</h2>
         <p id="customAlertMessage" class="mb-6"></p>
         <button id="closeAlertBtn" class="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
             OK
@@ -203,7 +203,7 @@
 
 <div id="videoPreviewModal" class="fixed bottom-4 right-4 bg-[#1e1e1e] rounded-lg p-2 shadow-lg border border-gray-700 z-50 hidden">
     <video id="localVideoPreview" autoplay muted playsinline class="w-48 h-auto rounded-md"></video>
-    <button id="stopStreamBtn" class="mt-2 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 rounded-lg text-sm transition-colors">Parar Transmissão</button>
+    <button id="stopStreamBtn" class="mt-2 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 rounded-lg text-sm transition-colors">Stop Stream</button>
 </div>
 
 <div id="reactionPickerTemplate" class="reaction-picker">
@@ -217,7 +217,7 @@
 
 <script src="https://unpkg.com/@streamr/sdk@latest/dist/streamr-sdk.web.js"></script>
 <script>
-    // --- CONFIGURAÇÃO ---
+    // --- CONFIGURATION ---
     const CHAT_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app1';
     const METRICS_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app2';
     const IMAGE_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app3';
@@ -230,14 +230,16 @@
     const ONLINE_TIMEOUT = 20 * 1000;
     const IMAGE_MAX_WIDTH = 500;
     const VIDEO_FRAME_RATE = 15;
-    const PIECE_SIZE = 64 * 1024; // 64 KB para fiabilidade
-    const TYPING_INDICATOR_TIMEOUT = 3000; // 3 segundos
+    const PIECE_SIZE = 64 * 1024; // 64 KB for reliability
+    const TYPING_INDICATOR_TIMEOUT = 3000; // 3 seconds
 
-    // --- VARIÁVEIS DE ESTADO ---
+    // --- STATE VARIABLES ---
     let streamr;
     let myPublisherId = '';
     let myNickname = '';
+    let myRealAddress = ''; // Stores the public wallet address
     let userNicknames = new Map();
+    let userRealAddresses = new Map(); // Maps session ID to real address
     let lastMessages = [];
     let messageCounter = 0;
     let activeUsers = new Map();
@@ -254,9 +256,9 @@
     let typingUsers = new Map();
     let isTypingTimeout = null;
     let replyingTo = null;
-    let presenceInterval = null; // Adicionado para gerir o intervalo de presença
+    let presenceInterval = null;
 
-    // --- ELEMENTOS DOM ---
+    // --- DOM ELEMENTS ---
     const chatUI = document.getElementById('chatUI');
     const loginModal = document.getElementById('loginModal');
     const loginContent = document.getElementById('loginContent');
@@ -302,12 +304,18 @@
     const walletBtn = document.getElementById('walletBtn');
 
 
-    // --- FUNÇÕES AUXILIARES ---
-    function getDisplayName(userId) {
-        return userNicknames.get(userId) || userId.slice(0, 12);
+    // --- HELPER FUNCTIONS ---
+    function getDisplayName(sessionId) {
+        const realAddress = userRealAddresses.get(sessionId);
+        if (realAddress) {
+            const nickname = userNicknames.get(realAddress);
+            return nickname || `${realAddress.slice(0, 6)}...${realAddress.slice(-4)}`;
+        }
+        const guestNickname = userNicknames.get(sessionId);
+        return guestNickname || `${sessionId.slice(0, 6)}...${sessionId.slice(-4)}`;
     }
 
-    // --- FUNÇÕES DE UI ---
+    // --- UI FUNCTIONS ---
     function showCustomAlert(title, message) {
         customAlertTitle.textContent = title;
         customAlertMessage.textContent = message;
@@ -319,7 +327,7 @@
         if (colorClass !== 'bg-yellow-500') statusIndicator.classList.remove('animate-pulse');
     }
     
-    function setLoginModalState(state) { // 'buttons' or 'loading'
+    function setLoginModalState(state) {
         if (state === 'loading') {
             loginContent.classList.add('hidden');
             loadingContent.classList.remove('hidden');
@@ -330,8 +338,6 @@
         loginModal.classList.remove('hidden');
     }
 
-    // --- O restante das suas funções de UI, manipulação de mensagens, etc., permanecem aqui ---
-    // Nenhuma alteração necessária para addMessageToUI, updateUserList, etc.
     function addMessageToUI(message, metadata, isHistorical = false) {
         if (message.tempId) {
             const tempElement = document.getElementById(message.tempId);
@@ -340,8 +346,13 @@
             }
         }
 
+        if (message.realAddress) {
+            userRealAddresses.set(metadata.publisherId, message.realAddress);
+        }
+        
         if (message.nickname) {
-            userNicknames.set(metadata.publisherId, message.nickname);
+            const addressKey = userRealAddresses.get(metadata.publisherId) || metadata.publisherId;
+            userNicknames.set(addressKey, message.nickname);
         }
 
         const messageId = message.id || metadata.timestamp;
@@ -362,14 +373,14 @@
         if (message.replyToMessageId) {
             replyHTML = `
                 <div class="reply-snippet" data-scroll-to="${message.replyToMessageId}">
-                    <div class="font-bold text-xs text-cyan-400">${getDisplayName(message.replyToUser)}</div>
+                    <div class="font-bold text-xs text-cyan-400">Replying to ${getDisplayName(message.replyToUser)}</div>
                     <div class="text-xs text-gray-400 truncate">${message.replyToContent}</div>
                 </div>
             `;
         }
 
         if (message.type === 'image') {
-             contentHTML = `<div class="text-xs italic text-gray-500" data-image-id="${message.imageId}">A carregar imagem...</div>`;
+             contentHTML = `<div class="text-xs italic text-gray-500" data-image-id="${message.imageId}">Loading image...</div>`;
              if (isHistorical) {
                  requestData('image', message.imageId);
              }
@@ -382,7 +393,7 @@
                         <div class="font-semibold">${fileName}</div>
                         <div class="text-xs text-gray-400">${(fileSize / 1024 / 1024).toFixed(2)} MB</div>
                     </div>
-                    <button class="file-button" data-file-id="${fileId}" ${isOwnFile ? 'disabled' : ''}>${isOwnFile ? 'Disponível' : 'Descarregar'}</button>
+                    <button class="file-button" data-file-id="${fileId}" ${isOwnFile ? 'disabled' : ''}>${isOwnFile ? 'Available' : 'Download'}</button>
                 </div>`;
             if (!isOwnFile) {
                 incomingFiles.set(fileId, {
@@ -394,7 +405,7 @@
         } else if (message.type === 'start_stream') {
             contentHTML = `<canvas id="stream-${message.streamId}" width="480" height="360" class="bg-black rounded-md"></canvas>`;
         } else if (message.type === 'stop_stream') {
-            contentHTML = `<div class="text-xs italic text-gray-500">Transmissão terminada.</div>`;
+            contentHTML = `<div class="text-xs italic text-gray-500">Stream ended.</div>`;
             if (remoteStreams.has(message.streamId)) {
                 if (remoteStreams.get(message.streamId).audioContext) {
                     remoteStreams.get(message.streamId).audioContext.close();
@@ -411,8 +422,8 @@
                 ${replyHTML}
                 <div class="message-content">${contentHTML}</div>
                 <div class="message-actions">
-                    <div class="reply-button" data-message-id="${messageId}" title="Responder">↩️</div>
-                    <div class="react-button" data-message-id="${messageId}" title="Reagir">😀</div>
+                    <div class="reply-button" data-message-id="${messageId}" title="Reply">↩️</div>
+                    <div class="react-button" data-message-id="${messageId}" title="React">😀</div>
                 </div>
             </div>
             <div class="reactions-container" data-reactions-for="${messageId}"></div>
@@ -447,14 +458,14 @@
         usersCounter.textContent = activeUsers.size;
         usersList.innerHTML = '';
         if (activeUsers.size > 0) {
-            activeUsers.forEach((data, userId) => {
+            activeUsers.forEach((data, sessionId) => {
                 const userItem = document.createElement('div');
                 userItem.className = 'user-item';
-                userItem.innerHTML = `<div class="user-dot"></div><span class="truncate">${getDisplayName(userId)}</span>`;
+                userItem.innerHTML = `<div class="user-dot"></div><span class="truncate">${getDisplayName(sessionId)}</span>`;
                 usersList.appendChild(userItem);
             });
         } else {
-            usersList.innerHTML = '<div class="text-gray-400 text-sm text-center">Ninguém online.</div>';
+            usersList.innerHTML = '<div class="text-gray-400 text-sm text-center">No one online.</div>';
         }
     }
     
@@ -542,14 +553,19 @@
     async function publishPresence() {
         if (!streamr) return;
         try {
-            const payload = { type: 'presence', lastActive: Date.now(), nickname: myNickname };
+            const payload = { 
+                type: 'presence', 
+                lastActive: Date.now(), 
+                nickname: myNickname,
+                realAddress: myRealAddress
+            };
             if (currentLiveStreamId) {
                 payload.isStreaming = true;
                 payload.streamId = currentLiveStreamId;
             }
             await streamr.publish(METRICS_STREAM_ID, payload);
         } catch (err) {
-            console.error("Falha ao publicar presença", err);
+            console.error("Failed to publish presence", err);
         }
     }
     async function publishLastMessages() {
@@ -569,10 +585,10 @@
                 type: 'last_messages'
             });
         } catch (err) {
-            console.error("Falha ao publicar últimas mensagens", err);
+            console.error("Failed to publish last messages", err);
         }
     }
-    async function requestData(dataType, dataId) { if (!streamr) return; try { await streamr.publish(METRICS_STREAM_ID, { type: `${dataType}_request`, [`${dataType}Id`]: dataId }); } catch (err) { console.error(`Falha ao solicitar dados de ${dataType}`, err); } }
+    async function requestData(dataType, dataId) { if (!streamr) return; try { await streamr.publish(METRICS_STREAM_ID, { type: `${dataType}_request`, [`${dataType}Id`]: dataId }); } catch (err) { console.error(`Failed to request ${dataType} data`, err); } }
     
     async function handleDataRequest(message) {
         if (!streamr) return;
@@ -581,14 +597,18 @@
         if (dataType === 'image' && loadedImages.has(dataId)) {
             const data = loadedImages.get(dataId);
             try { await streamr.publish(IMAGE_STREAM_ID, { id: dataId, data: data }); }
-            catch (err) { console.error(`Falha ao responder ao pedido de imagem`, err); }
+            catch (err) { console.error(`Failed to respond to image request`, err); }
         }
     }
 
     function processMetricsMessage(message, metadata) {
         if (message.type === 'presence') {
+            if (message.realAddress) {
+                userRealAddresses.set(metadata.publisherId, message.realAddress);
+            }
             if(message.nickname) {
-                userNicknames.set(metadata.publisherId, message.nickname);
+                const addressKey = message.realAddress || metadata.publisherId;
+                userNicknames.set(addressKey, message.nickname);
             }
             activeUsers.set(metadata.publisherId, { lastActive: Date.now() });
             updateUserList();
@@ -661,7 +681,7 @@
                 transfer.receivedCount++;
 
                 const progress = Math.round((transfer.receivedCount / transfer.metadata.pieceHashes.length) * 100);
-                updateFileUI(fileId, `A receber... ${progress}%`);
+                updateFileUI(fileId, `Receiving... ${progress}%`);
 
                 if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
                     assembleFile(fileId);
@@ -673,7 +693,7 @@
                 }
             }
         } catch (error) {
-            console.error("Erro em handleFileStreamMessage:", error);
+            console.error("Error in handleFileStreamMessage:", error);
         }
     }
 
@@ -739,31 +759,32 @@
         }
     }
 
-    // --- LÓGICA DE LOGIN E INICIALIZAÇÃO (REFEITA COM DIAGNÓSTICO) ---
     async function cleanupClient() {
         if (presenceInterval) {
             clearInterval(presenceInterval);
             presenceInterval = null;
         }
         if (streamr) {
-            console.log("Diagnóstico: A limpar cliente Streamr anterior...");
+            console.log("Diagnosis: Cleaning up previous Streamr client...");
             await streamr.destroy();
             streamr = null;
-            console.log("Diagnóstico: Cliente anterior limpo.");
+            console.log("Diagnosis: Previous client cleaned up.");
         }
     }
 
     async function initializeChat(authOptions = {}) {
-        await cleanupClient(); // Garante que qualquer sessão anterior seja limpa
+        await cleanupClient();
         try {
             streamr = new StreamrClient(authOptions);
             myPublisherId = await streamr.getAddress();
-            myNickname = localStorage.getItem('nickname') || '';
-            userNicknames.set(myPublisherId, myNickname);
+            
+            const nicknameKey = myRealAddress || myPublisherId;
+            myNickname = localStorage.getItem(`nickname_${nicknameKey}`) || '';
+            userNicknames.set(nicknameKey, myNickname);
             
             loginModal.classList.add('hidden');
             chatUI.classList.remove('hidden');
-            userIdDisplay.textContent = myNickname || myPublisherId;
+            userIdDisplay.textContent = myNickname || myRealAddress || myPublisherId;
             userInfo.classList.remove('hidden');
             updateStatus('bg-green-500');
 
@@ -786,45 +807,74 @@
             }, 3000);
         } catch (error) {
             updateStatus('bg-red-500');
-            throw new Error(`Não foi possível iniciar o chat. ${error.message}`);
+            throw new Error(`Could not initialize chat. ${error.message}`);
         }
     }
     
+    // --- WALLET CONNECTION FUNCTION (FINAL) ---
     async function connectWithWallet() {
         const injectedProvider = window.ethereum || window.top?.ethereum;
 
         if (!injectedProvider) {
-            throw new Error("MetaMask não encontrada. Por favor, instale a extensão MetaMask e atualize a página.");
+            throw new Error("MetaMask not found. Please install the MetaMask extension and refresh the page.");
         }
 
         try {
-            // 1. Pedir ao provedor da MetaMask para se conectar e obter as contas do utilizador.
-            // O método 'eth_requestAccounts' é a forma padrão do EIP-1193 para fazer isto.
-            await injectedProvider.request({ method: 'eth_requestAccounts' });
+            setLoginModalState('loading');
+            const provider = new ethers.providers.Web3Provider(injectedProvider);
+            await provider.send("eth_requestAccounts", []);
+            const signer = provider.getSigner();
+            const userAddress = await signer.getAddress();
+            const chainId = await signer.getChainId();
+            myRealAddress = userAddress;
 
-            // 2. Passar o provedor injetado (window.ethereum) diretamente para o StreamrClient.
-            // A biblioteca Streamr sabe como interagir com este objeto padrão (EIP-1193)
-            // para obter o endereço e pedir uma assinatura para a sessão, sem causar o erro de recursão.
+            const domain = {
+                name: 'Public Decentralized Chat',
+                version: '1',
+                chainId: chainId,
+                salt: ethers.utils.hexlify(ethers.utils.randomBytes(32))
+            };
+
+            const types = {
+                Login: [
+                    { name: 'purpose', type: 'string' },
+                    { name: 'nonce', type: 'uint256' }
+                ],
+            };
+
+            const value = {
+                purpose: 'Sign to create a secure session key for the chat. This is not a transaction and costs no gas.',
+                nonce: Date.now(),
+            };
+            
+            const signature = await signer._signTypedData(domain, types, value);
+            const sessionPrivateKey = ethers.utils.sha256(ethers.utils.toUtf8Bytes(signature));
+            
             await initializeChat({
                 auth: {
-                    ethereum: injectedProvider,
+                    privateKey: sessionPrivateKey,
                 },
             });
+            
             localStorage.setItem('authMethod', 'metamask');
         } catch (err) {
-            console.error("Erro apanhado durante o processo de conexão da carteira:", err);
-            throw new Error("O pedido de conexão da carteira foi rejeitado ou falhou: " + err.message);
+            console.error("Detailed error during wallet connection:", err);
+            myRealAddress = ''; // Clear on error
+            let errorMessage = "Wallet connection request was rejected or failed.";
+            if (err.code === 'ACTION_REJECTED' || (err.info && err.info.error && err.info.error.code === 4001) ) {
+                errorMessage = "The signature request was rejected in your wallet.";
+            }
+            throw new Error(errorMessage);
         }
     }
     
     async function disconnectWallet() {
         await cleanupClient();
         localStorage.removeItem('authMethod');
+        myRealAddress = '';
         window.location.reload();
     }
 
-
-    // --- LÓGICA DE ENVIO E MANIPULAÇÃO DE FICHEIROS (INALTERADA) ---
     async function sendMessage() {
         const text = messageInput.value.trim();
         if (!text || !streamr) return;
@@ -833,22 +883,23 @@
             type: 'text',
             content: text,
             id: crypto.randomUUID(),
-            nickname: myNickname
+            nickname: myNickname,
+            realAddress: myRealAddress 
         };
 
         if (replyingTo) {
             messagePayload.replyToMessageId = replyingTo.id || replyingTo.timestamp;
+            messagePayload.replyToUser = replyingTo.userId;
             
             let replySnippet = '';
             if (replyingTo.type === 'text') {
                 replySnippet = replyingTo.content;
             } else if (replyingTo.type === 'image') {
-                replySnippet = 'Imagem';
+                replySnippet = 'Image';
             } else if (replyingTo.type === 'file_announce') {
-                replySnippet = `Ficheiro: ${message.metadata.fileName}`;
+                replySnippet = `File: ${replyingTo.metadata.fileName}`;
             }
             messagePayload.replyToContent = replySnippet;
-            messagePayload.replyToUser = replyingTo.userId;
         }
 
         try {
@@ -863,7 +914,7 @@
                 replyingTo = null;
                 replyingToContainer.classList.add('hidden');
             }
-        } catch (error) { console.error(error); showCustomAlert('Erro', 'Falha ao enviar mensagem: ' + error.message); }
+        } catch (error) { console.error(error); showCustomAlert('Error', 'Failed to send message: ' + error.message); }
     }
     
     async function sendReaction(messageId, emoji) {
@@ -871,7 +922,7 @@
         try {
             await streamr.publish(REACTION_STREAM_ID, { messageId, emoji, userId: myPublisherId });
         } catch (error) {
-            console.error("Falha ao enviar reação:", error);
+            console.error("Failed to send reaction:", error);
         }
     }
 
@@ -880,7 +931,7 @@
         try {
             await streamr.publish(TYPING_STREAM_ID, { type: 'is_typing' });
         } catch(err) {
-            console.error("Não foi possível enviar sinal de digitação", err);
+            console.error("Could not send typing signal", err);
         }
     }
 
@@ -910,12 +961,19 @@
             const metadata = await generateFileMetadata(fileData);
             localFiles.set(metadata.fileId, { fileData, metadata });
             const messageId = crypto.randomUUID();
-            await streamr.publish(CHAT_STREAM_ID, { type: 'file_announce', metadata, id: messageId, tempId: tempId, nickname: myNickname });
+            await streamr.publish(CHAT_STREAM_ID, { 
+                type: 'file_announce', 
+                metadata, 
+                id: messageId, 
+                tempId: tempId, 
+                nickname: myNickname,
+                realAddress: myRealAddress 
+            });
         } catch (error) {
-            console.error("Falha ao anunciar ficheiro:", error);
+            console.error("Failed to announce file:", error);
             const tempElement = document.getElementById(tempId);
             if (tempElement) {
-                tempElement.querySelector('.message-content').textContent = 'Erro ao processar o ficheiro.';
+                tempElement.querySelector('.message-content').textContent = 'Error processing file.';
             }
         }
     }
@@ -923,10 +981,10 @@
     function startDownload(fileId) {
         const transfer = incomingFiles.get(fileId);
         if (!transfer) {
-            console.error(`[Recetor] Nenhuma informação de transferência encontrada para o ficheiro ${fileId}`);
+            console.error(`[Receiver] No transfer info found for file ${fileId}`);
             return;
         }
-        updateFileUI(fileId, "A solicitar...");
+        updateFileUI(fileId, "Requesting...");
         requestPiece(fileId, 0);
     }
 
@@ -935,7 +993,7 @@
         try {
             await streamr.publish(FILE_STREAM_ID, { type: 'piece_request', fileId, pieceIndex });
         } catch (error) {
-            console.error(`[Recetor] Falha ao solicitar a parte ${pieceIndex}:`, error);
+            console.error(`[Receiver] Failed to request piece ${pieceIndex}:`, error);
         }
     }
 
@@ -963,7 +1021,7 @@
             
             await streamr.publish(FILE_STREAM_ID, { type: 'file_piece', fileId, pieceIndex, data });
         } catch (error) {
-            console.error(`[Emissor] Falha ao enviar a parte ${pieceIndex}:`, error);
+            console.error(`[Sender] Failed to send piece ${pieceIndex}:`, error);
         }
     }
 
@@ -975,9 +1033,9 @@
 
         if (blob) {
             const url = URL.createObjectURL(blob);
-            updateFileUI(fileId, 'Guardar Ficheiro', true, url, transfer.metadata.fileName);
+            updateFileUI(fileId, 'Save File', true, url, transfer.metadata.fileName);
         } else {
-            updateFileUI(fileId, 'Erro na Montagem');
+            updateFileUI(fileId, 'Assembly Error');
         }
     }
 
@@ -996,7 +1054,7 @@
     function fileToBase64(file, callback) {
         const reader = new FileReader();
         reader.onload = (e) => callback(e.target.result);
-        reader.onerror = (error) => console.error('Erro na leitura do ficheiro:', error);
+        reader.onerror = (error) => console.error('File reading error:', error);
         reader.readAsDataURL(file);
     }
 
@@ -1020,7 +1078,6 @@
         });
     }
     
-    // --- LÓGICA DE TRANSMISSÃO DE VÍDEO (INALTERADA) ---
     async function startLiveStream() {
         if (localMediaStream || !streamr) return;
         try {
@@ -1030,7 +1087,7 @@
                     audio: true
                 });
             } catch (err) {
-                console.warn("Não foi possível obter áudio e vídeo, a tentar apenas vídeo.", err);
+                console.warn("Could not get audio and video, trying video only.", err);
                 localMediaStream = await navigator.mediaDevices.getUserMedia({
                     video: { width: 480, height: 360 },
                     audio: false
@@ -1046,7 +1103,13 @@
             const ctx = canvas.getContext('2d');
             
             currentLiveStreamId = crypto.randomUUID();
-            await streamr.publish(CHAT_STREAM_ID, { type: 'start_stream', streamId: currentLiveStreamId, id: crypto.randomUUID(), nickname: myNickname });
+            await streamr.publish(CHAT_STREAM_ID, { 
+                type: 'start_stream', 
+                streamId: currentLiveStreamId, 
+                id: crypto.randomUUID(), 
+                nickname: myNickname,
+                realAddress: myRealAddress
+            });
 
             videoStreamInterval = setInterval(() => {
                 ctx.drawImage(localVideoPreview, 0, 0, canvas.width, canvas.height);
@@ -1068,14 +1131,14 @@
                 source.connect(audioProcessor);
                 audioProcessor.connect(audioContext.destination);
             } else {
-                console.log("A transmitir sem áudio, pois não foi encontrada nenhuma faixa de áudio.");
+                console.log("Streaming without audio as no audio track was found.");
             }
 
         } catch (err) {
-            console.error("Falha ao iniciar a transmissão de vídeo:", err);
+            console.error("Failed to start video stream:", err);
             showCustomAlert(
-                "Acesso à Câmara/Microfone Negado",
-                "Não foi possível aceder à câmara ou ao microfone. Verifique as permissões do site nas configurações do seu navegador."
+                "Camera/Microphone Access Denied",
+                "Could not access the camera or microphone. Please check the site permissions in your browser settings."
             );
         }
     }
@@ -1099,7 +1162,13 @@
         }
         videoPreviewModal.classList.add('hidden');
         if (currentLiveStreamId && streamr) {
-            await streamr.publish(CHAT_STREAM_ID, { type: 'stop_stream', streamId: currentLiveStreamId, id: crypto.randomUUID(), nickname: myNickname });
+            await streamr.publish(CHAT_STREAM_ID, { 
+                type: 'stop_stream', 
+                streamId: currentLiveStreamId, 
+                id: crypto.randomUUID(), 
+                nickname: myNickname,
+                realAddress: myRealAddress
+            });
             currentLiveStreamId = null;
         }
     }
@@ -1112,11 +1181,11 @@
             if (message.type === 'text') {
                 contentSnippet = message.content;
             } else if (message.type === 'image') {
-                contentSnippet = 'Imagem';
+                contentSnippet = 'Image';
             } else if (message.type === 'file_announce') {
-                contentSnippet = `Ficheiro: ${message.metadata.fileName}`;
+                contentSnippet = `File: ${message.metadata.fileName}`;
             }
-            replyingToUser.textContent = `A responder a ${getDisplayName(message.userId)}`;
+            replyingToUser.textContent = `Replying to ${getDisplayName(message.userId)}`;
             replyingToText.textContent = contentSnippet;
             replyingToContainer.classList.remove('hidden');
             messageInput.focus();
@@ -1132,7 +1201,13 @@
                 const file = e.target.files[0];
                 const messageId = crypto.randomUUID();
                 const dataId = crypto.randomUUID();
-                addMessageToUI({ type: 'image', imageId: dataId, id: messageId, nickname: myNickname }, { publisherId: myPublisherId, timestamp: Date.now() });
+                addMessageToUI({ 
+                    type: 'image', 
+                    imageId: dataId, 
+                    id: messageId, 
+                    nickname: myNickname, 
+                    realAddress: myRealAddress 
+                }, { publisherId: myPublisherId, timestamp: Date.now() });
                 
                 resizeImage(file, async (base64Data) => {
                     try {
@@ -1141,7 +1216,7 @@
                             await streamr.publish(IMAGE_STREAM_ID, { id: dataId, data: base64Data });
                         }
                     } catch (error) {
-                        console.error(`Falha ao enviar imagem:`, error);
+                        console.error(`Failed to send image:`, error);
                     }
                 });
                 e.target.value = '';
@@ -1168,7 +1243,7 @@
                     <div class="message-bubble">
                         <div class="message-content flex items-center">
                             <div class="spinner"></div>
-                            <span>A processar ${file.name}...</span>
+                            <span>Processing ${file.name}...</span>
                         </div>
                     </div>
                 `;
@@ -1305,16 +1380,18 @@
         });
 
         nicknameBtn.addEventListener('click', () => {
-            nicknameInput.value = myNickname;
+            const nicknameKey = myRealAddress || myPublisherId;
+            nicknameInput.value = userNicknames.get(nicknameKey) || '';
             nicknameModal.classList.remove('hidden');
         });
 
         saveNicknameBtn.addEventListener('click', () => {
             const newNickname = nicknameInput.value.trim();
+            const nicknameKey = myRealAddress || myPublisherId;
             if (newNickname) {
                 myNickname = newNickname;
-                localStorage.setItem('nickname', myNickname);
-                userNicknames.set(myPublisherId, myNickname);
+                localStorage.setItem(`nickname_${nicknameKey}`, myNickname);
+                userNicknames.set(nicknameKey, myNickname);
                 userIdDisplay.textContent = myNickname;
                 publishPresence();
                 nicknameModal.classList.add('hidden');
@@ -1374,12 +1451,10 @@
         });
 
         connectWalletBtn.addEventListener('click', async () => {
-            setLoginModalState('loading');
             try {
                 await connectWithWallet();
             } catch (err) {
-                console.error("Falha ao conectar carteira:", err);
-                showCustomAlert("Erro de Carteira", err.message);
+                console.error("Failed to connect wallet:", err);
                 localStorage.removeItem('authMethod');
                 setLoginModalState('buttons');
             }
@@ -1387,10 +1462,11 @@
 
         guestBtn.addEventListener('click', async () => {
             localStorage.removeItem('authMethod');
+            myRealAddress = '';
             try {
-                await initializeChat(); // Conexão anónima
+                await initializeChat(); // Anonymous connection
             } catch (err) {
-                showCustomAlert("Erro de Conexão", err.message);
+                console.error("Connection Error:", err);
                 setLoginModalState('buttons');
             }
         });
@@ -1404,24 +1480,18 @@
         });
     }
 
-    // --- LÓGICA DE INICIALIZAÇÃO ---
+    // --- INITIALIZATION LOGIC ---
     async function handlePageLoad() {
-        setupEventListeners(); // Configura todos os event listeners
+        setupEventListeners();
         const preferredAuth = localStorage.getItem('authMethod');
 
         if (preferredAuth !== 'metamask') {
             setLoginModalState('buttons');
             return;
         }
-
-        setLoginModalState('loading');
-        try {
-            await connectWithWallet();
-        } catch (err) {
-            console.warn("Falha na reconexão automática:", err.message);
-            localStorage.removeItem('authMethod');
-            setLoginModalState('buttons');
-        }
+        
+        localStorage.removeItem('authMethod');
+        setLoginModalState('buttons');
     }
 
     window.addEventListener('load', handlePageLoad);
