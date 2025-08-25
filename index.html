@@ -67,6 +67,16 @@
     @keyframes highlight { 0% { background-color: rgba(59, 130, 246, 0.5); } 100% { background-color: transparent; } }
     .live-indicator { width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; display: inline-block; margin-left: 8px; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+    
+    /* Styles for invisible video preview */
+    #localVideoPreview.hidden-preview {
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        position: absolute;
+        top: -1px;
+        left: -1px;
+    }
 </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4">
@@ -245,10 +255,10 @@
 </div>
 
 
-<div id="videoPreviewModal" class="fixed bottom-4 right-4 bg-[#1e1e1e] rounded-lg p-2 shadow-lg border border-gray-700 z-50 hidden">
-    <video id="localVideoPreview" autoplay muted playsinline class="w-48 h-auto rounded-md"></video>
-    <div class="flex gap-2 mt-2">
-        <button id="stopStreamBtn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 rounded-lg text-sm transition-colors">Stop</button>
+<div id="videoPreviewModal" class="fixed bottom-4 right-4 bg-transparent z-50 hidden">
+    <video id="localVideoPreview" autoplay muted playsinline class="hidden-preview"></video>
+    <div class="flex">
+        <button id="stopStreamBtn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg text-sm transition-colors">Stop</button>
     </div>
 </div>
 
@@ -259,6 +269,72 @@
     <span data-emoji="💀">💀</span> <span data-emoji="🚀">🚀</span> <span data-emoji="👌">👌</span> <span data-emoji="💩">💩</span>
     <span data-emoji="🤡">🤡</span>
 </div>
+
+<!-- Web Worker script for file processing -->
+<script id="fileWorkerScript" type="text/worker">
+    self.onmessage = async (event) => {
+        const { file, PIECE_SIZE } = event.data;
+        const fileBuffer = await file.arrayBuffer();
+
+        const pieceHashes = [];
+        const totalPieces = Math.ceil(file.size / PIECE_SIZE);
+
+        for (let i = 0; i < totalPieces; i++) {
+            const start = i * PIECE_SIZE;
+            const end = Math.min(start + PIECE_SIZE, file.size);
+            const pieceBuffer = fileBuffer.slice(start, end);
+            const hashBuffer = await self.crypto.subtle.digest('SHA-1', pieceBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            pieceHashes.push(hashHex);
+        }
+
+        const metadata = {
+            fileId: self.crypto.randomUUID(),
+            fileName: file.name,
+            fileSize: file.size,
+            pieceHashes: pieceHashes
+        };
+
+        self.postMessage({ metadata: metadata, fileBuffer: fileBuffer });
+    };
+</script>
+
+<!-- Web Worker script for video frame encoding -->
+<script id="videoWorkerScript" type="text/worker">
+    let canvas = null;
+    let ctx = null;
+
+    self.onmessage = (event) => {
+        const { imageData } = event.data;
+        if (!canvas) {
+            canvas = new OffscreenCanvas(imageData.width, imageData.height);
+            ctx = canvas.getContext('2d');
+        }
+        ctx.putImageData(imageData, 0, 0);
+        canvas.convertToBlob({ type: 'image/jpeg', quality: 0.5 }).then(blob => {
+            self.postMessage(blob);
+        });
+    };
+</script>
+
+<!-- Audio Worklet Processor script -->
+<script id="audioProcessorScript" type="text/audioworklet">
+    class AudioSenderProcessor extends AudioWorkletProcessor {
+        constructor() {
+            super();
+        }
+        process(inputs, outputs, parameters) {
+            const input = inputs[0];
+            if (input.length > 0) {
+                const audioData = input[0];
+                this.port.postMessage(audioData);
+            }
+            return true;
+        }
+    }
+    registerProcessor('audio-sender-processor', AudioSenderProcessor);
+</script>
 
 
 <script src="https://unpkg.com/@streamr/sdk@latest/dist/streamr-sdk.web.js"></script>
@@ -296,7 +372,7 @@
     let videoStreamInterval = null;
     let currentLiveStreamId = null;
     let audioContext;
-    let audioProcessor;
+    let audioNode; // Replaces audioProcessor
     let remoteStreams = new Map();
     let messageReactions = new Map();
     let typingUsers = new Map();
@@ -304,6 +380,8 @@
     let replyingTo = null;
     let presenceInterval = null;
     let selectedFile = null;
+    let fileWorker = null;
+    let videoWorker = null; // Worker for video encoding
 
     // --- DOM ELEMENTS ---
     const chatUI = document.getElementById('chatUI');
@@ -487,6 +565,23 @@
         
         messagesContainer.appendChild(msgDiv);
         updateReactionsUI(messageId);
+
+        // FIX: Draw buffered frame if it exists
+        if (message.type === 'start_stream') {
+            const streamInfo = remoteStreams.get(message.streamId);
+            if (streamInfo && streamInfo.lastFrame) {
+                const canvas = document.getElementById(`stream-${message.streamId}`);
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    const img = new Image();
+                    img.onload = () => {
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    };
+                    img.src = streamInfo.lastFrame;
+                    delete streamInfo.lastFrame; // Clean up
+                }
+            }
+        }
 
         if (!isHistorical) {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -755,6 +850,8 @@
 
     function handleVideoStreamMessage(message) {
         const canvas = document.getElementById(`stream-${message.streamId}`);
+        let streamInfo = remoteStreams.get(message.streamId) || {};
+
         if (canvas) {
             const ctx = canvas.getContext('2d');
             const img = new Image();
@@ -762,7 +859,12 @@
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             };
             img.src = message.frame;
+            delete streamInfo.lastFrame;
+        } else {
+            // Canvas not ready, buffer the frame
+            streamInfo.lastFrame = message.frame;
         }
+        remoteStreams.set(message.streamId, streamInfo);
     }
 
     function handleAudioStreamMessage(message) {
@@ -826,11 +928,46 @@
             streamr = null;
             console.log("Diagnosis: Previous client cleaned up.");
         }
+        if (fileWorker) {
+            fileWorker.terminate();
+            fileWorker = null;
+        }
+        if (videoWorker) {
+            videoWorker.terminate();
+            videoWorker = null;
+        }
     }
 
     async function initializeChat(authOptions = {}) {
         await cleanupClient();
         try {
+            // Initialize Web Workers
+            const fileWorkerScript = document.getElementById('fileWorkerScript').textContent;
+            const fileWorkerBlob = new Blob([fileWorkerScript], { type: 'application/javascript' });
+            fileWorker = new Worker(URL.createObjectURL(fileWorkerBlob));
+            fileWorker.onmessage = (event) => {
+                const { metadata, fileBuffer } = event.data;
+                const fileData = { buffer: fileBuffer, name: metadata.fileName, size: metadata.fileSize };
+                const tempId = `temp-file-${metadata.fileId}`;
+                announceFile(metadata, fileData, tempId);
+            };
+            fileWorker.onerror = (error) => { console.error("Error in file worker:", error); showCustomAlert("File Processing Error", "Could not process the file."); };
+
+            const videoWorkerScript = document.getElementById('videoWorkerScript').textContent;
+            const videoWorkerBlob = new Blob([videoWorkerScript], { type: 'application/javascript' });
+            videoWorker = new Worker(URL.createObjectURL(videoWorkerBlob));
+            videoWorker.onmessage = async (event) => {
+                const frameBlob = event.data;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    if (streamr && currentLiveStreamId) {
+                        streamr.publish(VIDEO_STREAM_ID, { streamId: currentLiveStreamId, frame: reader.result });
+                    }
+                };
+                reader.readAsDataURL(frameBlob);
+            };
+            videoWorker.onerror = (error) => { console.error("Error in video worker:", error); };
+
             streamr = new StreamrClient(authOptions);
             myPublisherId = await streamr.getAddress();
             
@@ -991,30 +1128,34 @@
         }
     }
 
-    async function generateFileMetadata(fileData) {
-        const pieceHashes = [];
-        const totalPieces = Math.ceil(fileData.size / PIECE_SIZE);
-        for (let i = 0; i < totalPieces; i++) {
-            const start = i * PIECE_SIZE;
-            const end = Math.min(start + PIECE_SIZE, fileData.size);
-            const pieceBuffer = fileData.buffer.slice(start, end);
-            const hashBuffer = await crypto.subtle.digest('SHA-1', pieceBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            pieceHashes.push(hashHex);
+    function generateFileMetadata(file) {
+        if (fileWorker) {
+            const tempId = 'temp-file-' + crypto.randomUUID();
+            const tempMsgDiv = document.createElement('div');
+            tempMsgDiv.id = tempId;
+            tempMsgDiv.className = 'message-entry own-message';
+            tempMsgDiv.innerHTML = `
+                <div class="message-bubble">
+                    <div class="message-content flex items-center">
+                        <div class="spinner"></div>
+                        <span>Processing ${file.name}...</span>
+                    </div>
+                </div>
+            `;
+            messagesContainer.appendChild(tempMsgDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            // The worker will calculate metadata and then post a message back.
+            // The onmessage handler will call announceFile.
+            fileWorker.postMessage({ file: file, PIECE_SIZE: PIECE_SIZE });
+        } else {
+            console.error("File worker not initialized!");
         }
-        return {
-            fileId: crypto.randomUUID(),
-            fileName: fileData.name,
-            fileSize: fileData.size,
-            pieceHashes: pieceHashes
-        };
     }
 
-    async function announceFile(fileData, tempId) {
+    async function announceFile(metadata, fileData, tempId) {
         if (!streamr) return;
         try {
-            const metadata = await generateFileMetadata(fileData);
             localFiles.set(metadata.fileId, { fileData, metadata });
             const messageId = crypto.randomUUID();
             await streamr.publish(CHAT_STREAM_ID, { 
@@ -1135,16 +1276,40 @@
     }
     
     async function promptCameraSelection() {
+        if (localMediaStream) {
+            localMediaStream.getTracks().forEach(track => track.stop());
+            localMediaStream = null;
+        }
+
         try {
+            try {
+                // First, try to get both video and audio.
+                localMediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            } catch (err) {
+                // If that fails, it might be because there's no microphone.
+                if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+                    console.warn("Could not get audio device, trying video only.");
+                    // Fallback to video only.
+                    localMediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                } else {
+                    // Re-throw other errors (like permission denied).
+                    throw err;
+                }
+            }
+            
             const devices = await navigator.mediaDevices.enumerateDevices();
             const videoDevices = devices.filter(device => device.kind === 'videoinput');
             
             if (videoDevices.length === 0) {
                 showCustomAlert("No Camera Found", "No camera devices were found on your system.");
+                if (localMediaStream) {
+                    localMediaStream.getTracks().forEach(track => track.stop());
+                    localMediaStream = null;
+                }
                 return;
             }
 
-            cameraSelect.innerHTML = ''; // Clear previous options
+            cameraSelect.innerHTML = '';
             videoDevices.forEach(device => {
                 const option = document.createElement('option');
                 option.value = device.deviceId;
@@ -1152,35 +1317,41 @@
                 cameraSelect.appendChild(option);
             });
 
+            const currentVideoTrack = localMediaStream.getVideoTracks()[0];
+            if (currentVideoTrack) {
+                cameraSelect.value = currentVideoTrack.getSettings().deviceId;
+            }
+
             cameraSelectModal.classList.remove('hidden');
         } catch (err) {
-            console.error("Error enumerating devices:", err);
-            showCustomAlert("Device Error", "Could not access media devices. Please check permissions.");
+            console.error("Error getting media permissions or enumerating devices:", err);
+            showCustomAlert("Permissions Error", "Could not access media devices. Please grant camera and microphone permissions and try again.");
+            if (localMediaStream) {
+                localMediaStream.getTracks().forEach(track => track.stop());
+                localMediaStream = null;
+            }
         }
     }
 
-    async function startLiveStream(deviceId) {
-        if (localMediaStream) await stopLiveStream(); // Stop existing stream before starting a new one
+    async function startLiveStream(selectedDeviceId) {
         if (!streamr) return;
-        
-        try {
-            const constraints = {
-                video: { 
-                    width: 480, 
-                    height: 360,
-                    deviceId: deviceId ? { exact: deviceId } : undefined
-                },
-                audio: true
-            };
 
-            try {
-                localMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-            } catch (err) {
-                console.warn("Could not get audio and video, trying video only.", err);
-                delete constraints.audio;
+        try {
+            const currentVideoTrack = localMediaStream ? localMediaStream.getVideoTracks()[0] : null;
+            const currentDeviceId = currentVideoTrack ? currentVideoTrack.getSettings().deviceId : null;
+
+            if (selectedDeviceId !== currentDeviceId) {
+                if (localMediaStream) {
+                    localMediaStream.getTracks().forEach(track => track.stop());
+                }
+                const hasAudio = localMediaStream && localMediaStream.getAudioTracks().length > 0;
+                const constraints = {
+                    video: { width: 480, height: 360, deviceId: { exact: selectedDeviceId } },
+                    audio: hasAudio
+                };
                 localMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
             }
-
+            
             localVideoPreview.srcObject = localMediaStream;
             videoPreviewModal.classList.remove('hidden');
 
@@ -1199,26 +1370,34 @@
             });
 
             videoStreamInterval = setInterval(() => {
+                if (!localVideoPreview.srcObject) return;
                 ctx.drawImage(localVideoPreview, 0, 0, canvas.width, canvas.height);
-                const frame = canvas.toDataURL('image/jpeg', 0.5);
-                streamr.publish(VIDEO_STREAM_ID, { streamId: currentLiveStreamId, frame });
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                if (videoWorker) {
+                    videoWorker.postMessage({ imageData }, [imageData.data.buffer]);
+                }
             }, 1000 / VIDEO_FRAME_RATE);
 
             const audioTracks = localMediaStream.getAudioTracks();
-            if (audioTracks.length > 0) {
+            if (audioTracks.length > 0 && typeof AudioWorkletNode !== 'undefined') {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const source = audioContext.createMediaStreamSource(localMediaStream);
-                audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+                
+                const audioProcessorScript = document.getElementById('audioProcessorScript').textContent;
+                const audioProcessorBlob = new Blob([audioProcessorScript], { type: 'application/javascript' });
+                const audioProcessorUrl = URL.createObjectURL(audioProcessorBlob);
 
-                audioProcessor.onaudioprocess = (e) => {
-                    const audioData = e.inputBuffer.getChannelData(0);
-                    streamr.publish(AUDIO_STREAM_ID, { streamId: currentLiveStreamId, audioData: Array.from(audioData) });
+                await audioContext.audioWorklet.addModule(audioProcessorUrl);
+                audioNode = new AudioWorkletNode(audioContext, 'audio-sender-processor');
+                audioNode.port.onmessage = (event) => {
+                    const audioData = event.data;
+                    if (streamr && currentLiveStreamId) {
+                        streamr.publish(AUDIO_STREAM_ID, { streamId: currentLiveStreamId, audioData: Array.from(audioData) });
+                    }
                 };
-
-                source.connect(audioProcessor);
-                audioProcessor.connect(audioContext.destination);
+                source.connect(audioNode).connect(audioContext.destination);
             } else {
-                console.log("Streaming without audio as no audio track was found.");
+                console.log("Streaming without audio (AudioWorklet not supported or no audio track).");
             }
 
         } catch (err) {
@@ -1227,6 +1406,10 @@
                 "Camera/Microphone Access Denied",
                 "Could not access the camera or microphone. Please check the site permissions in your browser settings."
             );
+            if (localMediaStream) {
+                localMediaStream.getTracks().forEach(track => track.stop());
+                localMediaStream = null;
+            }
         }
     }
 
@@ -1234,12 +1417,13 @@
         if (videoStreamInterval) clearInterval(videoStreamInterval);
         videoStreamInterval = null;
         
-        if (audioProcessor) {
-            audioProcessor.disconnect();
-            audioProcessor = null;
+        if (audioNode) {
+            audioNode.disconnect();
+            audioNode.port.close();
+            audioNode = null;
         }
         if (audioContext) {
-            audioContext.close();
+            await audioContext.close();
             audioContext = null;
         }
 
@@ -1332,24 +1516,8 @@
                     }
                 });
             } else {
-                const tempId = 'temp-file-' + crypto.randomUUID();
-                const tempMsgDiv = document.createElement('div');
-                tempMsgDiv.id = tempId;
-                tempMsgDiv.className = 'message-entry own-message';
-                tempMsgDiv.innerHTML = `
-                    <div class="message-bubble">
-                        <div class="message-content flex items-center">
-                            <div class="spinner"></div>
-                            <span>Processing ${file.name}...</span>
-                        </div>
-                    </div>
-                `;
-                messagesContainer.appendChild(tempMsgDiv);
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-                const fileBuffer = await file.arrayBuffer();
-                const fileData = { buffer: fileBuffer, name: file.name, size: file.size, type: file.type };
-                await announceFile(fileData, tempId);
+                // Delegate file processing to the Web Worker
+                generateFileMetadata(file);
             }
         });
 
@@ -1366,6 +1534,11 @@
 
         cancelStreamBtn.addEventListener('click', () => {
             cameraSelectModal.classList.add('hidden');
+            // If the user cancels, stop the stream we requested for permissions.
+            if (localMediaStream) {
+                localMediaStream.getTracks().forEach(track => track.stop());
+                localMediaStream = null;
+            }
         });
         
         stopStreamBtn.addEventListener('click', stopLiveStream);
