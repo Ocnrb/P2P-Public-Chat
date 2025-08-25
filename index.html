@@ -34,8 +34,9 @@
     .picker-menu { position: absolute; bottom: 50px; left: 10px; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; }
     .emoji-picker { display: flex; flex-wrap: wrap; max-width: 300px; max-height: 200px; overflow-y: auto; }
     .emoji-picker span { cursor: pointer; margin: 2px; font-size: 1.2rem; }
-    .attach-menu button { display: block; width: 100%; text-align: left; padding: 0.5rem 1rem; border-radius: 0.25rem; background: none; border: none; color: #e0e0e0; cursor: pointer; }
-    .attach-menu button:hover { background-color: #374151; }
+    .attach-menu button, .attach-menu select { display: block; width: 100%; text-align: left; padding: 0.5rem 1rem; border-radius: 0.25rem; background: none; border: none; color: #e0e0e0; cursor: pointer; }
+    .attach-menu button:hover, .attach-menu select:hover { background-color: #374151; }
+    .attach-menu select { background-color: #1f1f1f; }
     #messagesContainer { background-color: #181818; border: 1px solid #333; overflow-y: auto; }
     #messageInput { background-color: #1f1f1f; color: #e0e0e0; border: 1px solid #333; -ms-overflow-style: none; scrollbar-width: none; }
     #messageInput::-webkit-scrollbar { display: none; }
@@ -64,6 +65,8 @@
     .reply-snippet { background-color: rgba(0,0,0,0.2); border-left: 2px solid #2563eb; padding: 4px 8px; margin-bottom: 6px; border-radius: 4px; cursor: pointer; }
     .highlighted .message-bubble { animation: highlight 1s ease; }
     @keyframes highlight { 0% { background-color: rgba(59, 130, 246, 0.5); } 100% { background-color: transparent; } }
+    .live-indicator { width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; display: inline-block; margin-left: 8px; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
 </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4">
@@ -180,7 +183,7 @@
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
         <h2 class="text-2xl font-bold mb-4 text-white">About This Chat</h2>
         <p class="mb-4">Data is transmitted P2P in real-time via the <a href="https://docs.streamr.network/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Streamr</a> pub/sub network.</p>
-        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of simultaneous users, uncensored, tamper-proof, and resilient communication without relying on central servers.</p>
+        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of concurrent users, ensuring secure, tamper-proof, and resilient communication without relying on central servers.</p>
         <div class="bg-yellow-900 border-l-4 border-yellow-500 text-yellow-100 p-4 rounded-r-lg">
             <h3 class="font-bold">Security Warning</h3>
             <p>This is a public and unmoderated chat. Be cautious when downloading files from unknown users, as they may contain malicious software.</p>
@@ -201,9 +204,52 @@
     </div>
 </div>
 
+<div id="fileConfirmModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
+        <h2 class="text-2xl font-bold mb-4 text-white">Confirm File Send</h2>
+        <div class="mb-6 text-left">
+            <p>You are about to send the following file:</p>
+            <p class="mt-2 bg-[#2a2a2a] p-3 rounded-lg">
+                <strong>File:</strong> <span id="confirmFileName"></span><br>
+                <strong>Size:</strong> <span id="confirmFileSize"></span>
+            </p>
+        </div>
+        <div class="flex justify-end gap-4">
+            <button id="cancelSendBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                Cancel
+            </button>
+            <button id="confirmSendBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                Confirm & Send
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- NEW: Camera Selection Modal -->
+<div id="cameraSelectModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
+        <h2 class="text-2xl font-bold mb-4 text-white">Select Camera</h2>
+        <div class="mb-6">
+            <label for="cameraSelect" class="block mb-2 text-sm font-medium text-gray-400">Choose a video source:</label>
+            <select id="cameraSelect" class="w-full bg-[#2a2a2a] border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-400"></select>
+        </div>
+        <div class="flex justify-end gap-4">
+            <button id="cancelStreamBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                Cancel
+            </button>
+            <button id="startStreamBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                Start Stream
+            </button>
+        </div>
+    </div>
+</div>
+
+
 <div id="videoPreviewModal" class="fixed bottom-4 right-4 bg-[#1e1e1e] rounded-lg p-2 shadow-lg border border-gray-700 z-50 hidden">
     <video id="localVideoPreview" autoplay muted playsinline class="w-48 h-auto rounded-md"></video>
-    <button id="stopStreamBtn" class="mt-2 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 rounded-lg text-sm transition-colors">Stop Stream</button>
+    <div class="flex gap-2 mt-2">
+        <button id="stopStreamBtn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 rounded-lg text-sm transition-colors">Stop</button>
+    </div>
 </div>
 
 <div id="reactionPickerTemplate" class="reaction-picker">
@@ -237,9 +283,9 @@
     let streamr;
     let myPublisherId = '';
     let myNickname = '';
-    let myRealAddress = ''; // Stores the public wallet address
+    let myRealAddress = '';
     let userNicknames = new Map();
-    let userRealAddresses = new Map(); // Maps session ID to real address
+    let userRealAddresses = new Map();
     let lastMessages = [];
     let messageCounter = 0;
     let activeUsers = new Map();
@@ -257,6 +303,7 @@
     let isTypingTimeout = null;
     let replyingTo = null;
     let presenceInterval = null;
+    let selectedFile = null;
 
     // --- DOM ELEMENTS ---
     const chatUI = document.getElementById('chatUI');
@@ -293,6 +340,15 @@
     const customAlertTitle = document.getElementById('customAlertTitle');
     const customAlertMessage = document.getElementById('customAlertMessage');
     const closeAlertBtn = document.getElementById('closeAlertBtn');
+    const fileConfirmModal = document.getElementById('fileConfirmModal');
+    const confirmFileName = document.getElementById('confirmFileName');
+    const confirmFileSize = document.getElementById('confirmFileSize');
+    const cancelSendBtn = document.getElementById('cancelSendBtn');
+    const confirmSendBtn = document.getElementById('confirmSendBtn');
+    const cameraSelectModal = document.getElementById('cameraSelectModal');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const startStreamBtn = document.getElementById('startStreamBtn');
+    const cancelStreamBtn = document.getElementById('cancelStreamBtn');
     const replyingToContainer = document.getElementById('replying-to-container');
     const replyingToUser = document.getElementById('replying-to-user');
     const replyingToText = document.getElementById('replying-to-text');
@@ -403,7 +459,7 @@
                 });
             }
         } else if (message.type === 'start_stream') {
-            contentHTML = `<canvas id="stream-${message.streamId}" width="480" height="360" class="bg-black rounded-md"></canvas>`;
+            contentHTML = `<div class="flex items-center">Streaming Live <span class="live-indicator"></span></div><canvas id="stream-${message.streamId}" width="480" height="360" class="bg-black rounded-md"></canvas>`;
         } else if (message.type === 'stop_stream') {
             contentHTML = `<div class="text-xs italic text-gray-500">Stream ended.</div>`;
             if (remoteStreams.has(message.streamId)) {
@@ -859,7 +915,7 @@
             localStorage.setItem('authMethod', 'metamask');
         } catch (err) {
             console.error("Detailed error during wallet connection:", err);
-            myRealAddress = ''; // Clear on error
+            myRealAddress = '';
             let errorMessage = "Wallet connection request was rejected or failed.";
             if (err.code === 'ACTION_REJECTED' || (err.info && err.info.error && err.info.error.code === 4001) ) {
                 errorMessage = "The signature request was rejected in your wallet.";
@@ -1078,20 +1134,51 @@
         });
     }
     
-    async function startLiveStream() {
-        if (localMediaStream || !streamr) return;
+    async function promptCameraSelection() {
         try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            
+            if (videoDevices.length === 0) {
+                showCustomAlert("No Camera Found", "No camera devices were found on your system.");
+                return;
+            }
+
+            cameraSelect.innerHTML = ''; // Clear previous options
+            videoDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.textContent = device.label || `Camera ${cameraSelect.options.length + 1}`;
+                cameraSelect.appendChild(option);
+            });
+
+            cameraSelectModal.classList.remove('hidden');
+        } catch (err) {
+            console.error("Error enumerating devices:", err);
+            showCustomAlert("Device Error", "Could not access media devices. Please check permissions.");
+        }
+    }
+
+    async function startLiveStream(deviceId) {
+        if (localMediaStream) await stopLiveStream(); // Stop existing stream before starting a new one
+        if (!streamr) return;
+        
+        try {
+            const constraints = {
+                video: { 
+                    width: 480, 
+                    height: 360,
+                    deviceId: deviceId ? { exact: deviceId } : undefined
+                },
+                audio: true
+            };
+
             try {
-                localMediaStream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 480, height: 360 },
-                    audio: true
-                });
+                localMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
             } catch (err) {
                 console.warn("Could not get audio and video, trying video only.", err);
-                localMediaStream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 480, height: 360 },
-                    audio: false
-                });
+                delete constraints.audio;
+                localMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
             }
 
             localVideoPreview.srcObject = localMediaStream;
@@ -1195,10 +1282,35 @@
     // --- EVENT LISTENERS ---
     function setupEventListeners() {
         sendImageBtn.addEventListener('click', () => imageInputFile.click());
-        
-        imageInputFile.addEventListener('change', (e) => {
-            if (e.target.files && e.target.files[0]) {
-                const file = e.target.files[0];
+        sendFileBtn.addEventListener('click', () => genericFileInput.click());
+
+        function handleFileSelection(event) {
+            if (event.target.files && event.target.files[0]) {
+                selectedFile = event.target.files[0];
+                confirmFileName.textContent = selectedFile.name;
+                confirmFileSize.textContent = `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`;
+                fileConfirmModal.classList.remove('hidden');
+                attachMenu.classList.add('hidden');
+                event.target.value = ''; // Reset input
+            }
+        }
+
+        imageInputFile.addEventListener('change', handleFileSelection);
+        genericFileInput.addEventListener('change', handleFileSelection);
+
+        cancelSendBtn.addEventListener('click', () => {
+            selectedFile = null;
+            fileConfirmModal.classList.add('hidden');
+        });
+
+        confirmSendBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            const file = selectedFile;
+            selectedFile = null; // Clear after use
+            fileConfirmModal.classList.add('hidden');
+
+            if (file.type.startsWith('image/')) {
                 const messageId = crypto.randomUUID();
                 const dataId = crypto.randomUUID();
                 addMessageToUI({ 
@@ -1219,23 +1331,8 @@
                         console.error(`Failed to send image:`, error);
                     }
                 });
-                e.target.value = '';
-                attachMenu.classList.add('hidden');
-            }
-        });
-
-        sendFileBtn.addEventListener('click', () => genericFileInput.click());
-        goLiveBtn.addEventListener('click', () => {
-            startLiveStream();
-            attachMenu.classList.add('hidden');
-        });
-        stopStreamBtn.addEventListener('click', stopLiveStream);
-
-        genericFileInput.addEventListener('change', async (e) => {
-            if (e.target.files && e.target.files[0]) {
-                const file = e.target.files[0];
+            } else {
                 const tempId = 'temp-file-' + crypto.randomUUID();
-
                 const tempMsgDiv = document.createElement('div');
                 tempMsgDiv.id = tempId;
                 tempMsgDiv.className = 'message-entry own-message';
@@ -1252,12 +1349,26 @@
 
                 const fileBuffer = await file.arrayBuffer();
                 const fileData = { buffer: fileBuffer, name: file.name, size: file.size, type: file.type };
-
                 await announceFile(fileData, tempId);
-                e.target.value = '';
-                attachMenu.classList.add('hidden');
             }
         });
+
+        goLiveBtn.addEventListener('click', () => {
+            promptCameraSelection();
+            attachMenu.classList.add('hidden');
+        });
+
+        startStreamBtn.addEventListener('click', () => {
+            const selectedDeviceId = cameraSelect.value;
+            startLiveStream(selectedDeviceId);
+            cameraSelectModal.classList.add('hidden');
+        });
+
+        cancelStreamBtn.addEventListener('click', () => {
+            cameraSelectModal.classList.add('hidden');
+        });
+        
+        stopStreamBtn.addEventListener('click', stopLiveStream);
 
         messagesContainer.addEventListener('click', (e) => {
             const target = e.target;
