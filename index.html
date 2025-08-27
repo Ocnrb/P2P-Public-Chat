@@ -297,6 +297,10 @@
 
 <div id="videoPreviewModal" class="fixed bottom-4 right-4 bg-[#1e1e1e] rounded-lg p-2 shadow-lg border border-gray-700 z-50 hidden">
     <video id="localVideoPreview" autoplay muted playsinline class="w-48 h-auto rounded-md"></video>
+    <div class="mt-2">
+        <label for="opacitySlider" class="text-xs text-gray-400">Transparency</label>
+        <input id="opacitySlider" type="range" min="20" max="100" value="100" class="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+    </div>
     <div class="flex gap-2 mt-2">
         <button id="stopStreamBtn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 rounded-lg text-sm transition-colors">Stop</button>
     </div>
@@ -393,6 +397,7 @@
     const videoPreviewModal = document.getElementById('videoPreviewModal');
     const localVideoPreview = document.getElementById('localVideoPreview');
     const stopStreamBtn = document.getElementById('stopStreamBtn');
+    const opacitySlider = document.getElementById('opacitySlider');
     const customAlertModal = document.getElementById('customAlertModal');
     const customAlertTitle = document.getElementById('customAlertTitle');
     const customAlertMessage = document.getElementById('customAlertMessage');
@@ -1524,6 +1529,10 @@
         });
         
         stopStreamBtn.addEventListener('click', stopLiveStream);
+
+        opacitySlider.addEventListener('input', (e) => {
+            videoPreviewModal.style.opacity = e.target.value / 100;
+        });
 
         messagesContainer.addEventListener('click', (e) => {
             const target = e.target;
