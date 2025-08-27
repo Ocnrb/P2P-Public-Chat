@@ -70,6 +70,9 @@
     .tooltip { position: relative; display: inline-block; }
     .tooltip .tooltip-text { visibility: hidden; width: 280px; background-color: #2a2a2a; color: #fff; text-align: center; border-radius: 6px; padding: 8px; position: absolute; z-index: 1; bottom: 125%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; }
     .tooltip:hover .tooltip-text { visibility: visible; opacity: 1; }
+    .stream-container { position: relative; }
+    .stream-container:hover .fullscreen-btn { opacity: 1; }
+    .fullscreen-btn { position: absolute; top: 8px; right: 8px; background-color: rgba(0,0,0,0.5); border-radius: 50%; padding: 4px; color: white; opacity: 0; transition: opacity 0.2s; border: none; cursor: pointer; }
 </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4">
@@ -228,6 +231,50 @@
     </div>
 </div>
 
+<!-- NEW: Stream Quality Modal -->
+<div id="streamSettingsModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
+        <h2 class="text-2xl font-bold mb-6 text-white">Stream Settings</h2>
+        
+        <div class="space-y-6">
+            <div>
+                <label for="resolutionSelect" class="block mb-2 text-sm font-medium text-gray-400">Resolution</label>
+                <select id="resolutionSelect" class="w-full bg-[#2a2a2a] border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-400">
+                    <option value="640x360">360p (Low)</option>
+                    <option value="854x480" selected>480p (Medium)</option>
+                    <option value="1280x720">720p (High)</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="fpsSlider" class="flex justify-between mb-2 text-sm font-medium text-gray-400">
+                    <span>Frame Rate (FPS)</span>
+                    <span id="fpsValue">15</span>
+                </label>
+                <input id="fpsSlider" type="range" min="5" max="30" value="15" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+            </div>
+
+            <div>
+                <label for="qualitySlider" class="flex justify-between mb-2 text-sm font-medium text-gray-400">
+                    <span>JPEG Quality</span>
+                    <span id="qualityValue">50%</span>
+                </label>
+                <input id="qualitySlider" type="range" min="10" max="100" value="50" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+            </div>
+        </div>
+
+        <div class="flex justify-end gap-4 mt-8">
+            <button id="cancelStreamSettingsBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                Cancel
+            </button>
+            <button id="continueToCameraBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                Continue
+            </button>
+        </div>
+    </div>
+</div>
+
+
 <!-- NEW: Camera Selection Modal -->
 <div id="cameraSelectModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
@@ -278,7 +325,6 @@
     const MAX_MESSAGES = 200;
     const ONLINE_TIMEOUT = 20 * 1000;
     const IMAGE_MAX_WIDTH = 500;
-    const VIDEO_FRAME_RATE = 15;
     const PIECE_SIZE = 64 * 1024; // 64 KB for reliability
     const TYPING_INDICATOR_TIMEOUT = 3000; // 3 seconds
 
@@ -309,6 +355,12 @@
     let replyingTo = null;
     let presenceInterval = null;
     let selectedFile = null;
+    let streamSettings = {
+        width: 854,
+        height: 480,
+        frameRate: 15,
+        jpegQuality: 0.5
+    };
 
     // --- DOM ELEMENTS ---
     const chatUI = document.getElementById('chatUI');
@@ -354,6 +406,14 @@
     const cameraSelect = document.getElementById('cameraSelect');
     const startStreamBtn = document.getElementById('startStreamBtn');
     const cancelStreamBtn = document.getElementById('cancelStreamBtn');
+    const streamSettingsModal = document.getElementById('streamSettingsModal');
+    const resolutionSelect = document.getElementById('resolutionSelect');
+    const fpsSlider = document.getElementById('fpsSlider');
+    const fpsValue = document.getElementById('fpsValue');
+    const qualitySlider = document.getElementById('qualitySlider');
+    const qualityValue = document.getElementById('qualityValue');
+    const continueToCameraBtn = document.getElementById('continueToCameraBtn');
+    const cancelStreamSettingsBtn = document.getElementById('cancelStreamSettingsBtn');
     const replyingToContainer = document.getElementById('replying-to-container');
     const replyingToUser = document.getElementById('replying-to-user');
     const replyingToText = document.getElementById('replying-to-text');
@@ -438,6 +498,18 @@
             }
         }
 
+        const messageId = message.id || metadata.timestamp;
+        const existingMsg = document.getElementById(`msg-${messageId}`);
+        if (existingMsg) {
+            const existingSeal = existingMsg.querySelector('.message-seal');
+            // If the new message is LIVE and the existing one is HISTORICAL, we should replace it.
+            if (!isHistorical && existingSeal && existingSeal.dataset.sealType === 'historical') {
+                 existingMsg.remove();
+            } else {
+                return;
+            }
+        }
+
         if (message.realAddress) {
             userRealAddresses.set(metadata.publisherId, message.realAddress);
         }
@@ -446,10 +518,6 @@
             const addressKey = userRealAddresses.get(metadata.publisherId) || metadata.publisherId;
             userNicknames.set(addressKey, message.nickname);
         }
-
-        const messageId = message.id || metadata.timestamp;
-        const existingMsg = document.getElementById(`msg-${messageId}`);
-        if (existingMsg) return;
 
         let msgDiv = document.createElement('div');
         msgDiv.id = `msg-${messageId}`;
@@ -500,7 +568,14 @@
                 });
             }
         } else if (message.type === 'start_stream') {
-            contentHTML = `<div class="flex items-center">Live <span class="live-indicator"></span></div><canvas id="stream-${message.streamId}" width="480" height="360" class="bg-black rounded-md"></canvas>`;
+            contentHTML = `
+                <div class="stream-container">
+                    <div class="flex items-center">Live <span class="live-indicator"></span></div>
+                    <canvas id="stream-${message.streamId}" width="480" height="360" class="bg-black rounded-md"></canvas>
+                    <button class="fullscreen-btn" data-stream-id="${message.streamId}">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m0 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5h-4m0 0v-4m0 4l-5-5"></path></svg>
+                    </button>
+                </div>`;
         } else if (message.type === 'stop_stream') {
             contentHTML = `<div class="text-xs italic text-gray-500">Stream ended.</div>`;
             if (remoteStreams.has(message.streamId)) {
@@ -515,9 +590,11 @@
 
         msgDiv.innerHTML = `
             <div class="message-bubble">
-                 <div class="text-sm font-semibold mb-1 break-words">
-                    <span style="color: ${userColor};">${getDisplayName(metadata.publisherId)}</span>
-                    ${hasNick ? `<span class="font-mono text-gray-500 text-xs ml-2">${formattedId}</span>` : ''}
+                <div class="flex justify-between items-center mb-1">
+                    <div class="text-sm font-semibold break-words">
+                        <span style="color: ${userColor};">${getDisplayName(metadata.publisherId)}</span>
+                        ${hasNick ? `<span class="font-mono text-gray-500 text-xs ml-2">${formattedId}</span>` : ''}
+                    </div>
                 </div>
                 ${replyHTML}
                 <div class="message-content">${contentHTML}</div>
@@ -727,7 +804,7 @@
         } else if (message.type === 'last_messages') {
             const isHistoryValid = message.Counter > 0 ? (message.Last50messages && message.Last50messages.length > 0) : true;
             if (isHistoryValid && message.Counter > messageCounter && metadata.publisherId !== myPublisherId) {
-                messagesContainer.innerHTML = '';
+                // messagesContainer.innerHTML = ''; // THIS IS THE BUG
                 
                 if (message.Reactions) {
                     messageReactions = new Map(Object.entries(message.Reactions));
@@ -813,6 +890,8 @@
     }
 
     function handleAudioStreamMessage(message) {
+        if (message.streamId === currentLiveStreamId) return; // Prevents audio feedback loop for the streamer
+
         let streamInfo = remoteStreams.get(message.streamId);
         
         if (!streamInfo) {
@@ -1000,7 +1079,7 @@
             } else if (replyingTo.type === 'image') {
                 replySnippet = 'Image';
             } else if (replyingTo.type === 'file_announce') {
-                replySnippet = `File: ${replyingTo.metadata.fileName}`;
+                replySnippet = `File: ${message.metadata.fileName}`;
             }
             messagePayload.replyToContent = replySnippet;
         }
@@ -1182,15 +1261,15 @@
         }
     }
 
-    async function startLiveStream(deviceId) {
+    async function startLiveStream(deviceId, options) {
         if (localMediaStream) await stopLiveStream(); // Stop existing stream before starting a new one
         if (!streamr) return;
         
         try {
             const constraints = {
                 video: { 
-                    width: 480, 
-                    height: 360,
+                    width: { ideal: options.width }, 
+                    height: { ideal: options.height },
                     deviceId: deviceId ? { exact: deviceId } : undefined
                 },
                 audio: true
@@ -1208,8 +1287,8 @@
             videoPreviewModal.classList.remove('hidden');
 
             const canvas = document.createElement('canvas');
-            canvas.width = 480;
-            canvas.height = 360;
+            canvas.width = options.width;
+            canvas.height = options.height;
             const ctx = canvas.getContext('2d');
             
             currentLiveStreamId = crypto.randomUUID();
@@ -1222,10 +1301,33 @@
             });
 
             videoStreamInterval = setInterval(() => {
-                ctx.drawImage(localVideoPreview, 0, 0, canvas.width, canvas.height);
-                const frame = canvas.toDataURL('image/jpeg', 0.5);
+                // Aspect Ratio Correction
+                const videoWidth = localVideoPreview.videoWidth;
+                const videoHeight = localVideoPreview.videoHeight;
+                const canvasWidth = canvas.width;
+                const canvasHeight = canvas.height;
+                const videoRatio = videoWidth / videoHeight;
+                const canvasRatio = canvasWidth / canvasHeight;
+                let drawWidth, drawHeight, x, y;
+
+                if (videoRatio > canvasRatio) { // Video is wider than canvas
+                    drawWidth = canvasWidth;
+                    drawHeight = canvasWidth / videoRatio;
+                    x = 0;
+                    y = (canvasHeight - drawHeight) / 2;
+                } else { // Video is taller or same ratio
+                    drawHeight = canvasHeight;
+                    drawWidth = canvasHeight * videoRatio;
+                    y = 0;
+                    x = (canvasWidth - drawWidth) / 2;
+                }
+                
+                ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+                ctx.drawImage(localVideoPreview, x, y, drawWidth, drawHeight);
+
+                const frame = canvas.toDataURL('image/jpeg', options.jpegQuality);
                 streamr.publish(VIDEO_STREAM_ID, { streamId: currentLiveStreamId, frame });
-            }, 1000 / VIDEO_FRAME_RATE);
+            }, 1000 / options.frameRate);
 
             const audioTracks = localMediaStream.getAudioTracks();
             if (audioTracks.length > 0) {
@@ -1384,13 +1486,36 @@
         });
 
         goLiveBtn.addEventListener('click', () => {
-            promptCameraSelection();
+            streamSettingsModal.classList.remove('hidden');
             attachMenu.classList.add('hidden');
+        });
+
+        cancelStreamSettingsBtn.addEventListener('click', () => {
+            streamSettingsModal.classList.add('hidden');
+        });
+
+        continueToCameraBtn.addEventListener('click', () => {
+            const resolution = resolutionSelect.value.split('x');
+            streamSettings.width = parseInt(resolution[0], 10);
+            streamSettings.height = parseInt(resolution[1], 10);
+            streamSettings.frameRate = parseInt(fpsSlider.value, 10);
+            streamSettings.jpegQuality = parseInt(qualitySlider.value, 10) / 100;
+            
+            streamSettingsModal.classList.add('hidden');
+            promptCameraSelection();
+        });
+
+        fpsSlider.addEventListener('input', (e) => {
+            fpsValue.textContent = e.target.value;
+        });
+
+        qualitySlider.addEventListener('input', (e) => {
+            qualityValue.textContent = `${e.target.value}%`;
         });
 
         startStreamBtn.addEventListener('click', () => {
             const selectedDeviceId = cameraSelect.value;
-            startLiveStream(selectedDeviceId);
+            startLiveStream(selectedDeviceId, streamSettings);
             cameraSelectModal.classList.add('hidden');
         });
 
@@ -1410,6 +1535,21 @@
                     showCustomAlert('Verified Live Message 🛡️', 'This message was received directly from the network and is cryptographically signed by the sender.');
                 } else {
                     showCustomAlert('Historical Message 🕒', 'This message is part of a conversation history shared by another user. Its content cannot be guaranteed.');
+                }
+            }
+
+            const fullscreenBtn = target.closest('.fullscreen-btn');
+            if (fullscreenBtn) {
+                const streamId = fullscreenBtn.dataset.streamId;
+                const canvas = document.getElementById(`stream-${streamId}`);
+                if (canvas) {
+                    if (canvas.requestFullscreen) {
+                        canvas.requestFullscreen();
+                    } else if (canvas.webkitRequestFullscreen) { /* Safari */
+                        canvas.webkitRequestFullscreen();
+                    } else if (canvas.msRequestFullscreen) { /* IE11 */
+                        canvas.msRequestFullscreen();
+                    }
                 }
             }
 
