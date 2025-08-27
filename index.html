@@ -67,6 +67,9 @@
     @keyframes highlight { 0% { background-color: rgba(59, 130, 246, 0.5); } 100% { background-color: transparent; } }
     .live-indicator { width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; display: inline-block; margin-left: 8px; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+    .tooltip { position: relative; display: inline-block; }
+    .tooltip .tooltip-text { visibility: hidden; width: 280px; background-color: #2a2a2a; color: #fff; text-align: center; border-radius: 6px; padding: 8px; position: absolute; z-index: 1; bottom: 125%; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; }
+    .tooltip:hover .tooltip-text { visibility: visible; opacity: 1; }
 </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4">
@@ -112,7 +115,7 @@
         <div id="replying-to-container" class="p-3 border-t border-gray-700 hidden">
             <div class="bg-[#2a2a2a] p-2 rounded-lg relative">
                 <div class="border-l-2 border-cyan-400 pl-2">
-                    <div id="replying-to-user" class="font-bold text-sm text-cyan-400">Replying to...</div>
+                    <div id="replying-to-user" class="font-bold text-sm">Replying to...</div>
                     <div id="replying-to-text" class="text-xs text-gray-300 truncate"></div>
                 </div>
                 <button id="cancel-reply-btn" class="absolute top-1 right-1 text-gray-400 hover:text-white text-xl">&times;</button>
@@ -183,7 +186,7 @@
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
         <h2 class="text-2xl font-bold mb-4 text-white">About This Chat</h2>
         <p class="mb-4">Data is transmitted P2P in real-time via the <a href="https://docs.streamr.network/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Streamr</a> pub/sub network.</p>
-        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of concurrent users, ensuring secure, tamper-proof, and resilient communication without relying on central servers.</p>
+        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of concurrent users, while ensuring secure, <span class="text-cyan-400 font-semibold">tamper-proof</span>, and resilient communication without relying on central servers.</p>
         <div class="bg-yellow-900 border-l-4 border-yellow-500 text-yellow-100 p-4 rounded-r-lg">
             <h3 class="font-bold">Security Warning</h3>
             <p>This is a public and unmoderated chat. Be cautious when downloading files from unknown users, as they may contain malicious software.</p>
@@ -281,11 +284,13 @@
 
     // --- STATE VARIABLES ---
     let streamr;
+    let fileWorker; // NEW: Worker for file processing
     let myPublisherId = '';
     let myNickname = '';
     let myRealAddress = '';
     let userNicknames = new Map();
     let userRealAddresses = new Map();
+    let userColors = new Map(); // NEW: Store user colors
     let lastMessages = [];
     let messageCounter = 0;
     let activeUsers = new Map();
@@ -361,15 +366,45 @@
 
 
     // --- HELPER FUNCTIONS ---
-    function getDisplayName(sessionId) {
+    function getNickname(sessionId) {
         const realAddress = userRealAddresses.get(sessionId);
         if (realAddress) {
-            const nickname = userNicknames.get(realAddress);
-            return nickname || `${realAddress.slice(0, 6)}...${realAddress.slice(-4)}`;
+            return userNicknames.get(realAddress) || null;
         }
-        const guestNickname = userNicknames.get(sessionId);
-        return guestNickname || `${sessionId.slice(0, 6)}...${sessionId.slice(-4)}`;
+        return userNicknames.get(sessionId) || null;
     }
+
+    function getDisplayName(sessionId) {
+        const nickname = getNickname(sessionId);
+        if (nickname) return nickname;
+
+        const realAddress = userRealAddresses.get(sessionId);
+        if (realAddress) {
+            return `${realAddress.slice(0, 6)}...${realAddress.slice(-4)}`;
+        }
+        return `${sessionId.slice(0, 6)}...${sessionId.slice(-4)}`;
+    }
+    
+    // CORRECTED: This function now gets the most persistent ID for color mapping
+    function getColorKey(sessionId) {
+        return userRealAddresses.get(sessionId) || sessionId;
+    }
+
+    function getUserColor(userId) {
+        const colorKey = getColorKey(userId);
+        if (userColors.has(colorKey)) {
+            return userColors.get(colorKey);
+        }
+        let hash = 0;
+        for (let i = 0; i < colorKey.length; i++) {
+            hash = colorKey.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const h = hash % 360;
+        const color = `hsl(${h}, 80%, 70%)`;
+        userColors.set(colorKey, color);
+        return color;
+    }
+
 
     // --- UI FUNCTIONS ---
     function showCustomAlert(title, message) {
@@ -394,6 +429,7 @@
         loginModal.classList.remove('hidden');
     }
 
+    // MODIFIED: This function now shows the full publisher ID and moves the timestamp
     function addMessageToUI(message, metadata, isHistorical = false) {
         if (message.tempId) {
             const tempElement = document.getElementById(message.tempId);
@@ -423,13 +459,18 @@
         else msgDiv.classList.add('other-message');
         
         const timestamp = new Date(metadata.timestamp).toLocaleTimeString();
+        const userColor = getUserColor(metadata.publisherId); // Get user color
+        const formattedId = `(${metadata.publisherId.slice(0, 6)}...${metadata.publisherId.slice(-4)})`; // Format ID
+        const seal = isHistorical ? '🕒' : '🛡️';
+        const hasNick = getNickname(metadata.publisherId) !== null;
+
         let contentHTML = '';
         let replyHTML = '';
 
         if (message.replyToMessageId) {
             replyHTML = `
                 <div class="reply-snippet" data-scroll-to="${message.replyToMessageId}">
-                    <div class="font-bold text-xs text-cyan-400">Replying to ${getDisplayName(message.replyToUser)}</div>
+                    <div class="font-bold text-xs" style="color: ${getUserColor(message.replyToUser)};">Replying to ${getDisplayName(message.replyToUser)}</div>
                     <div class="text-xs text-gray-400 truncate">${message.replyToContent}</div>
                 </div>
             `;
@@ -449,7 +490,7 @@
                         <div class="font-semibold">${fileName}</div>
                         <div class="text-xs text-gray-400">${(fileSize / 1024 / 1024).toFixed(2)} MB</div>
                     </div>
-                    <button class="file-button" data-file-id="${fileId}" ${isOwnFile ? 'disabled' : ''}>${isOwnFile ? 'Available' : 'Download'}</button>
+                    <button class="file-button" data-file-id="${fileId}" ${isOwnFile ? 'disabled' : ''}>${isOwnFile ? 'Disponível' : 'Download'}</button>
                 </div>`;
             if (!isOwnFile) {
                 incomingFiles.set(fileId, {
@@ -459,7 +500,7 @@
                 });
             }
         } else if (message.type === 'start_stream') {
-            contentHTML = `<div class="flex items-center">Streaming Live <span class="live-indicator"></span></div><canvas id="stream-${message.streamId}" width="480" height="360" class="bg-black rounded-md"></canvas>`;
+            contentHTML = `<div class="flex items-center">Live <span class="live-indicator"></span></div><canvas id="stream-${message.streamId}" width="480" height="360" class="bg-black rounded-md"></canvas>`;
         } else if (message.type === 'stop_stream') {
             contentHTML = `<div class="text-xs italic text-gray-500">Stream ended.</div>`;
             if (remoteStreams.has(message.streamId)) {
@@ -474,9 +515,13 @@
 
         msgDiv.innerHTML = `
             <div class="message-bubble">
-                <div class="text-xs text-gray-400 mb-1">${getDisplayName(metadata.publisherId)} • ${timestamp}</div>
+                 <div class="text-sm font-semibold mb-1 break-words">
+                    <span style="color: ${userColor};">${getDisplayName(metadata.publisherId)}</span>
+                    ${hasNick ? `<span class="font-mono text-gray-500 text-xs ml-2">${formattedId}</span>` : ''}
+                </div>
                 ${replyHTML}
                 <div class="message-content">${contentHTML}</div>
+                <div class="text-right text-xs text-gray-500 mt-1">${timestamp} <span class="message-seal cursor-pointer" data-seal-type="${isHistorical ? 'historical' : 'live'}">${seal}</span></div>
                 <div class="message-actions">
                     <div class="reply-button" data-message-id="${messageId}" title="Reply">↩️</div>
                     <div class="react-button" data-message-id="${messageId}" title="React">😀</div>
@@ -505,6 +550,7 @@
         }
     }
 
+    // MODIFIED: Applies color to user list
     function updateUserList() {
         const now = Date.now();
         const timeLimit = now - ONLINE_TIMEOUT;
@@ -515,13 +561,14 @@
         usersList.innerHTML = '';
         if (activeUsers.size > 0) {
             activeUsers.forEach((data, sessionId) => {
+                const userColor = getUserColor(sessionId);
                 const userItem = document.createElement('div');
                 userItem.className = 'user-item';
-                userItem.innerHTML = `<div class="user-dot"></div><span class="truncate">${getDisplayName(sessionId)}</span>`;
+                userItem.innerHTML = `<div class="user-dot"></div><span class="truncate" style="color: ${userColor};">${getDisplayName(sessionId)}</span>`;
                 usersList.appendChild(userItem);
             });
         } else {
-            usersList.innerHTML = '<div class="text-gray-400 text-sm text-center">No one online.</div>';
+            usersList.innerHTML = '<div class="text-gray-400 text-sm text-center">Ninguém online.</div>';
         }
     }
     
@@ -737,7 +784,7 @@
                 transfer.receivedCount++;
 
                 const progress = Math.round((transfer.receivedCount / transfer.metadata.pieceHashes.length) * 100);
-                updateFileUI(fileId, `Receiving... ${progress}%`);
+                updateFileUI(fileId, `A receber... ${progress}%`);
 
                 if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
                     assembleFile(fileId);
@@ -991,46 +1038,22 @@
         }
     }
 
-    async function generateFileMetadata(fileData) {
-        const pieceHashes = [];
-        const totalPieces = Math.ceil(fileData.size / PIECE_SIZE);
-        for (let i = 0; i < totalPieces; i++) {
-            const start = i * PIECE_SIZE;
-            const end = Math.min(start + PIECE_SIZE, fileData.size);
-            const pieceBuffer = fileData.buffer.slice(start, end);
-            const hashBuffer = await crypto.subtle.digest('SHA-1', pieceBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            pieceHashes.push(hashHex);
-        }
-        return {
-            fileId: crypto.randomUUID(),
-            fileName: fileData.name,
-            fileSize: fileData.size,
-            pieceHashes: pieceHashes
-        };
-    }
-
-    async function announceFile(fileData, tempId) {
+    // MODIFIED: This function now only handles announcing the file after metadata is generated
+    async function announceFileWithMetadata(fileData, metadata) {
         if (!streamr) return;
         try {
-            const metadata = await generateFileMetadata(fileData);
             localFiles.set(metadata.fileId, { fileData, metadata });
             const messageId = crypto.randomUUID();
             await streamr.publish(CHAT_STREAM_ID, { 
                 type: 'file_announce', 
                 metadata, 
-                id: messageId, 
-                tempId: tempId, 
+                id: messageId,
                 nickname: myNickname,
                 realAddress: myRealAddress 
             });
         } catch (error) {
             console.error("Failed to announce file:", error);
-            const tempElement = document.getElementById(tempId);
-            if (tempElement) {
-                tempElement.querySelector('.message-content').textContent = 'Error processing file.';
-            }
+            showCustomAlert('Erro', `Falha ao anunciar o ficheiro ${metadata.fileName}.`);
         }
     }
 
@@ -1040,7 +1063,7 @@
             console.error(`[Receiver] No transfer info found for file ${fileId}`);
             return;
         }
-        updateFileUI(fileId, "Requesting...");
+        updateFileUI(fileId, "A pedir...");
         requestPiece(fileId, 0);
     }
 
@@ -1089,9 +1112,9 @@
 
         if (blob) {
             const url = URL.createObjectURL(blob);
-            updateFileUI(fileId, 'Save File', true, url, transfer.metadata.fileName);
+            updateFileUI(fileId, 'Guardar Ficheiro', true, url, transfer.metadata.fileName);
         } else {
-            updateFileUI(fileId, 'Assembly Error');
+            updateFileUI(fileId, 'Erro na Montagem');
         }
     }
 
@@ -1260,6 +1283,7 @@
         }
     }
 
+    // MODIFIED: Applies color to reply snippet
     function startReply(messageId) {
         const message = lastMessages.find(m => (m.id || m.timestamp) == messageId);
         if (message) {
@@ -1272,7 +1296,8 @@
             } else if (message.type === 'file_announce') {
                 contentSnippet = `File: ${message.metadata.fileName}`;
             }
-            replyingToUser.textContent = `Replying to ${getDisplayName(message.userId)}`;
+            const userColor = getUserColor(message.userId);
+            replyingToUser.innerHTML = `Replying to <span style="color: ${userColor};">${getDisplayName(message.userId)}</span>`;
             replyingToText.textContent = contentSnippet;
             replyingToContainer.classList.remove('hidden');
             messageInput.focus();
@@ -1303,6 +1328,7 @@
             fileConfirmModal.classList.add('hidden');
         });
 
+        // MODIFIED: This listener now delegates file processing to the Web Worker
         confirmSendBtn.addEventListener('click', async () => {
             if (!selectedFile) return;
 
@@ -1332,6 +1358,7 @@
                     }
                 });
             } else {
+                // 1. Create a temporary UI message to show processing is happening
                 const tempId = 'temp-file-' + crypto.randomUUID();
                 const tempMsgDiv = document.createElement('div');
                 tempMsgDiv.id = tempId;
@@ -1340,16 +1367,19 @@
                     <div class="message-bubble">
                         <div class="message-content flex items-center">
                             <div class="spinner"></div>
-                            <span>Processing ${file.name}...</span>
+                            <span>A processar ${file.name}...</span>
                         </div>
                     </div>
                 `;
                 messagesContainer.appendChild(tempMsgDiv);
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
+                // 2. Convert file to a buffer and send it to the worker
                 const fileBuffer = await file.arrayBuffer();
                 const fileData = { buffer: fileBuffer, name: file.name, size: file.size, type: file.type };
-                await announceFile(fileData, tempId);
+                
+                // 3. The worker will process it and its onmessage handler will announce the file
+                fileWorker.postMessage({ fileData, tempId });
             }
         });
 
@@ -1372,6 +1402,17 @@
 
         messagesContainer.addEventListener('click', (e) => {
             const target = e.target;
+            
+            const seal = target.closest('.message-seal');
+            if (seal) {
+                const sealType = seal.dataset.sealType;
+                if (sealType === 'live') {
+                    showCustomAlert('Verified Live Message 🛡️', 'This message was received directly from the network and is cryptographically signed by the sender.');
+                } else {
+                    showCustomAlert('Historical Message 🕒', 'This message is part of a conversation history shared by another user. Its content cannot be guaranteed.');
+                }
+            }
+
             if (target.tagName === 'BUTTON' && target.classList.contains('file-button') && !target.disabled) {
                 e.preventDefault();
                 const fileId = target.dataset.fileId;
@@ -1591,18 +1632,89 @@
         });
     }
 
+    // --- NEW: WEB WORKER SETUP ---
+    function setupFileWorker() {
+        const workerCode = `
+            // Este código corre na thread do worker (em segundo plano)
+            
+            // Função para calcular o hash SHA-1 de um ArrayBuffer
+            async function calculateSHA1(buffer) {
+                const hashBuffer = await crypto.subtle.digest('SHA-1', buffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+
+            self.onmessage = async (event) => {
+                const { fileData, tempId } = event.data;
+                const PIECE_SIZE = ${PIECE_SIZE}; 
+
+                const pieceHashes = [];
+                const totalPieces = Math.ceil(fileData.size / PIECE_SIZE);
+                
+                for (let i = 0; i < totalPieces; i++) {
+                    const start = i * PIECE_SIZE;
+                    const end = Math.min(start + PIECE_SIZE, fileData.size);
+                    const pieceBuffer = fileData.buffer.slice(start, end);
+                    const hash = await calculateSHA1(pieceBuffer);
+                    pieceHashes.push(hash);
+                }
+
+                const metadata = {
+                    fileId: crypto.randomUUID(),
+                    fileName: fileData.name,
+                    fileSize: fileData.size,
+                    pieceHashes: pieceHashes
+                };
+                
+                // Envia os metadados finais de volta para a thread principal
+                self.postMessage({ status: 'complete', metadata: metadata, fileData: fileData, tempId: tempId });
+            };
+        `;
+
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        fileWorker = new Worker(URL.createObjectURL(blob));
+
+        fileWorker.onmessage = (event) => {
+            const { status, metadata, fileData, tempId } = event.data;
+            if (status === 'complete') {
+                // O worker terminou. Agora, anuncia o ficheiro na thread principal.
+                const tempElement = document.getElementById(tempId);
+                if (tempElement) {
+                   tempElement.remove(); // Remove a mensagem "A processar..."
+                }
+                
+                // Chama a função para anunciar o ficheiro com os metadados pré-calculados
+                announceFileWithMetadata(fileData, metadata);
+            }
+        };
+
+        fileWorker.onerror = (error) => {
+            console.error("Error in file worker:", error);
+            showCustomAlert('Erro de Processamento', 'Não foi possível processar o ficheiro em segundo plano.');
+        };
+    }
+
     // --- INITIALIZATION LOGIC ---
+    // CORRECTED: This function now attempts to auto-connect if the user previously used a wallet.
     async function handlePageLoad() {
+        setupFileWorker();
         setupEventListeners();
         const preferredAuth = localStorage.getItem('authMethod');
 
-        if (preferredAuth !== 'metamask') {
+        if (preferredAuth === 'metamask') {
+            try {
+                // Attempt to auto-connect. This will show the loading modal briefly.
+                await connectWithWallet();
+            } catch (err) {
+                console.error("Auto-connect failed:", err);
+                // If it fails, clear the preference and show the login modal for manual login.
+                localStorage.removeItem('authMethod');
+                setLoginModalState('buttons');
+            }
+        } else {
+            // If no preferred method, just show the login modal.
             setLoginModalState('buttons');
-            return;
         }
-        
-        localStorage.removeItem('authMethod');
-        setLoginModalState('buttons');
     }
 
     window.addEventListener('load', handlePageLoad);
