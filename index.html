@@ -51,7 +51,7 @@
     .reactions-container { display: flex; gap: 4px; margin-top: 6px; }
     .reaction-badge { background-color: #374151; color: #e0e0e0; padding: 4px 10px; border-radius: 12px; font-size: 0.875rem; cursor: pointer; }
     .reaction-badge.user-reacted { background-color: #2563eb; }
-    .message-actions { position: absolute; top: -12px; right: -12px; display: none; gap: 4px; background-color: #374151; border-radius: 12px; padding: 2px 4px; z-index: 5; }
+    .message-actions { position: absolute; bottom: -12px; left: -12px; display: none; gap: 4px; background-color: #374151; border-radius: 12px; padding: 2px 4px; z-index: 5; }
     .message-bubble:hover .message-actions { display: flex; }
     .reply-button, .react-button { cursor: pointer; font-size: 16px; }
     .reaction-picker { position: absolute; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; display: none; flex-wrap: wrap; gap: 4px; max-width: 200px; }
@@ -189,7 +189,7 @@
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
         <h2 class="text-2xl font-bold mb-4 text-white">About This Chat</h2>
         <p class="mb-4">Data is transmitted P2P in real-time via the <a href="https://docs.streamr.network/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Streamr</a> pub/sub network.</p>
-        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of concurrent users, while ensuring secure, <span class="text-cyan-400 font-semibold">tamper-proof</span>, and resilient communication without relying on central servers.</p>
+        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of simultaneous users, while ensuring secure, tamper-proof, and resilient communication without relying on central servers.</p>
         <div class="bg-yellow-900 border-l-4 border-yellow-500 text-yellow-100 p-4 rounded-r-lg">
             <h3 class="font-bold">Security Warning</h3>
             <p>This is a public and unmoderated chat. Be cautious when downloading files from unknown users, as they may contain malicious software.</p>
@@ -256,7 +256,7 @@
 
             <div>
                 <label for="qualitySlider" class="flex justify-between mb-2 text-sm font-medium text-gray-400">
-                    <span>JPEG Quality</span>
+                    <span>Compression Quality</span>
                     <span id="qualityValue">50%</span>
                 </label>
                 <input id="qualitySlider" type="range" min="10" max="100" value="50" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
@@ -340,6 +340,7 @@
     let myRealAddress = '';
     let userNicknames = new Map();
     let userRealAddresses = new Map();
+    let verifiedRealAddresses = new Map(); // NEW: Store verified mappings
     let userColors = new Map(); // NEW: Store user colors
     let lastMessages = [];
     let messageCounter = 0;
@@ -527,15 +528,19 @@
         let msgDiv = document.createElement('div');
         msgDiv.id = `msg-${messageId}`;
         msgDiv.className = 'message-entry';
+        msgDiv.dataset.sessionId = metadata.publisherId; // Add session ID for later updates
         
         if (metadata.publisherId === myPublisherId) msgDiv.classList.add('own-message');
         else msgDiv.classList.add('other-message');
         
         const timestamp = new Date(metadata.timestamp).toLocaleTimeString();
         const userColor = getUserColor(metadata.publisherId); // Get user color
-        const formattedId = `(${metadata.publisherId.slice(0, 6)}...${metadata.publisherId.slice(-4)})`; // Format ID
+        const realAddress = verifiedRealAddresses.get(metadata.publisherId) || userRealAddresses.get(metadata.publisherId);
+        const formattedId = realAddress ? `(${realAddress.slice(0, 6)}...${realAddress.slice(-4)})` : `(${metadata.publisherId.slice(0, 6)}...${metadata.publisherId.slice(-4)})`;
         const seal = isHistorical ? '🕒' : '🛡️';
         const hasNick = getNickname(metadata.publisherId) !== null;
+        const isVerified = verifiedRealAddresses.has(metadata.publisherId);
+
 
         let contentHTML = '';
         let replyHTML = '';
@@ -596,9 +601,10 @@
         msgDiv.innerHTML = `
             <div class="message-bubble">
                 <div class="flex justify-between items-center mb-1">
-                    <div class="text-sm font-semibold break-words">
+                    <div class="user-info-header text-sm font-semibold break-words">
                         <span style="color: ${userColor};">${getDisplayName(metadata.publisherId)}</span>
-                        ${hasNick ? `<span class="font-mono text-gray-500 text-xs ml-2">${formattedId}</span>` : ''}
+                        ${hasNick && isVerified ? `<span class="font-mono text-gray-500 text-xs ml-2">${formattedId}</span>` : ''}
+                        <span class="verification-seal cursor-pointer">${isVerified ? '✅' : ''}</span>
                     </div>
                 </div>
                 ${replyHTML}
@@ -644,9 +650,10 @@
         if (activeUsers.size > 0) {
             activeUsers.forEach((data, sessionId) => {
                 const userColor = getUserColor(sessionId);
+                const isVerified = verifiedRealAddresses.has(sessionId);
                 const userItem = document.createElement('div');
                 userItem.className = 'user-item';
-                userItem.innerHTML = `<div class="user-dot"></div><span class="truncate" style="color: ${userColor};">${getDisplayName(sessionId)}</span>`;
+                userItem.innerHTML = `<div class="user-dot"></div><span class="truncate" style="color: ${userColor};">${getDisplayName(sessionId)} ${isVerified ? '✅' : ''}</span>`;
                 usersList.appendChild(userItem);
             });
         } else {
@@ -733,6 +740,29 @@
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
+    function updateUIVerification(sessionId) {
+        const messagesToUpdate = document.querySelectorAll(`.message-entry[data-session-id="${sessionId}"]`);
+        const isVerified = verifiedRealAddresses.has(sessionId);
+        if (!isVerified) return;
+
+        messagesToUpdate.forEach(msg => {
+            const userInfoHeader = msg.querySelector('.user-info-header');
+            if (userInfoHeader) {
+                const userColor = getUserColor(sessionId);
+                const realAddress = verifiedRealAddresses.get(sessionId);
+                const formattedId = realAddress ? `(${realAddress.slice(0, 6)}...${realAddress.slice(-4)})` : '';
+                const hasNick = getNickname(sessionId) !== null;
+                
+                userInfoHeader.innerHTML = `
+                    <span style="color: ${userColor};">${getDisplayName(sessionId)}</span>
+                    <span class="verification-seal cursor-pointer">✅</span>
+                    ${hasNick ? `<span class="font-mono text-gray-500 text-xs ml-2">${formattedId}</span>` : ''}
+                `;
+            }
+        });
+        updateUserList();
+    }
+
 
     // --- STREAMR FUNCTIONS ---
     async function publishPresence() {
@@ -786,7 +816,7 @@
         }
     }
 
-    function processMetricsMessage(message, metadata) {
+    async function processMetricsMessage(message, metadata) {
         if (message.type === 'presence') {
             if (message.realAddress) {
                 userRealAddresses.set(metadata.publisherId, message.realAddress);
@@ -806,10 +836,20 @@
                     addMessageToUI(fakeStartStreamMessage, fakeMetadata, true);
                 }
             }
+        } else if (message.type === 'identity_proof') {
+            try {
+                const recoveredAddress = ethers.utils.verifyMessage(message.proofMsg, message.signature);
+                if (recoveredAddress.toLowerCase() === message.realAddress.toLowerCase()) {
+                    verifiedRealAddresses.set(message.sessionId, message.realAddress);
+                    userRealAddresses.set(message.sessionId, message.realAddress); // Ensure this is also set
+                    updateUIVerification(message.sessionId);
+                }
+            } catch (e) {
+                console.error("Failed to verify identity proof:", e);
+            }
         } else if (message.type === 'last_messages') {
             const isHistoryValid = message.Counter > 0 ? (message.Last50messages && message.Last50messages.length > 0) : true;
             if (isHistoryValid && message.Counter > messageCounter && metadata.publisherId !== myPublisherId) {
-                // messagesContainer.innerHTML = ''; // THIS IS THE BUG
                 
                 if (message.Reactions) {
                     messageReactions = new Map(Object.entries(message.Reactions));
@@ -1044,6 +1084,21 @@
             });
             
             localStorage.setItem('authMethod', 'metamask');
+
+            // NEW: Identity Proof
+            const proofMsg = `Verifying ownership: My address ${myRealAddress} will be represented by session ${myPublisherId}`;
+            const proofSignature = await signer.signMessage(proofMsg);
+            await streamr.publish(METRICS_STREAM_ID, {
+                type: 'identity_proof',
+                realAddress: myRealAddress,
+                sessionId: myPublisherId,
+                proofMsg: proofMsg,
+                signature: proofSignature
+            });
+            verifiedRealAddresses.set(myPublisherId, myRealAddress); // Trust our own proof
+            updateUserList();
+
+
         } catch (err) {
             console.error("Detailed error during wallet connection:", err);
             myRealAddress = '';
@@ -1545,6 +1600,11 @@
                 } else {
                     showCustomAlert('Historical Message 🕒', 'This message is part of a conversation history shared by another user. Its content cannot be guaranteed.');
                 }
+            }
+
+            const verificationSeal = target.closest('.verification-seal');
+            if (verificationSeal) {
+                showCustomAlert('Verified User ✅', 'This user has cryptographically proven they own the displayed wallet address.');
             }
 
             const fullscreenBtn = target.closest('.fullscreen-btn');
