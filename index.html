@@ -189,7 +189,7 @@
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
         <h2 class="text-2xl font-bold mb-4 text-white">About This Chat</h2>
         <p class="mb-4">Data is transmitted P2P in real-time via the <a href="https://docs.streamr.network/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Streamr</a> pub/sub network.</p>
-        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of simultaneous users, while ensuring secure, tamper-proof, and resilient communication without relying on central servers.</p>
+        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of simultaneous users, while ensuring secure, <span class="text-cyan-400 font-semibold">tamper-proof</span>, and resilient communication without relying on central servers.</p>
         <div class="bg-yellow-900 border-l-4 border-yellow-500 text-yellow-100 p-4 rounded-r-lg">
             <h3 class="font-bold">Security Warning</h3>
             <p>This is a public and unmoderated chat. Be cautious when downloading files from unknown users, as they may contain malicious software.</p>
@@ -793,10 +793,12 @@
                     recentReactions[msgId] = reactions;
                 }
             }
+            const verifiedUsers = Array.from(verifiedRealAddresses.entries());
             await streamr.publish(METRICS_STREAM_ID, {
                 Last50messages: lastMessages,
                 Counter: messageCounter,
                 Reactions: recentReactions,
+                verifiedUsers: verifiedUsers,
                 type: 'last_messages'
             });
         } catch (err) {
@@ -851,6 +853,18 @@
             const isHistoryValid = message.Counter > 0 ? (message.Last50messages && message.Last50messages.length > 0) : true;
             if (isHistoryValid && message.Counter > messageCounter && metadata.publisherId !== myPublisherId) {
                 
+                if (message.verifiedUsers && Array.isArray(message.verifiedUsers)) {
+                    message.verifiedUsers.forEach(([sessionId, realAddress]) => {
+                        if (!verifiedRealAddresses.has(sessionId)) {
+                            verifiedRealAddresses.set(sessionId, realAddress);
+                            if (!userRealAddresses.has(sessionId)) {
+                                userRealAddresses.set(sessionId, realAddress);
+                            }
+                            updateUIVerification(sessionId);
+                        }
+                    });
+                }
+
                 if (message.Reactions) {
                     messageReactions = new Map(Object.entries(message.Reactions));
                 }
