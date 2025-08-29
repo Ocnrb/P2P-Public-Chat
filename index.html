@@ -90,7 +90,7 @@
             </div>
             <div class="flex items-center gap-4">
                 <div id="status-indicator" class="w-4 h-4 rounded-full bg-yellow-500 animate-pulse flex-shrink-0 mt-2 sm:mt-0"></div>
-                <button id="walletBtn" class="text-gray-400 hover:text-white transition-colors">
+                <button id="walletBtn" class="text-gray-400 hover:text-white transition-colors" title="Connect Wallet">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
                 </button>
                 <button id="nicknameBtn" class="text-gray-400 hover:text-white transition-colors">
@@ -128,9 +128,11 @@
         <div class="relative flex items-center">
             <input type="file" id="genericFileInput" class="hidden">
             <input type="file" id="imageInputFile" accept="image/*" class="hidden">
+            <input type="file" id="videoInputFile" accept="video/*" class="hidden">
             
             <div id="attachMenu" class="picker-menu attach-menu hidden">
                 <button id="sendImageBtn">Send Image</button>
+                <button id="sendVideoBtn">Send Video</button>
                 <button id="sendFileBtn">Send File</button>
                 <button id="goLiveBtn">Go Live</button>
             </div>
@@ -179,9 +181,14 @@
         <h2 class="text-2xl font-bold mb-4 text-white">Set Your Nickname</h2>
         <p class="mb-4">This will be displayed to other users in the chat.</p>
         <input type="text" id="nicknameInput" class="w-full bg-[#2a2a2a] border border-gray-600 rounded-lg p-2 mb-4 text-white focus:outline-none focus:ring-2 focus:ring-cyan-400" placeholder="Enter your nickname...">
-        <button id="saveNicknameBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-            Save
-        </button>
+        <div class="flex items-center gap-4">
+            <button id="saveNicknameBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                Save
+            </button>
+            <button id="resetNicknameBtn" class="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                Reset to ID
+            </button>
+        </div>
     </div>
 </div>
 
@@ -389,9 +396,11 @@
     const attachMenu = document.getElementById('attachMenu');
     const sendFileBtn = document.getElementById('sendFileBtn');
     const sendImageBtn = document.getElementById('sendImageBtn');
+    const sendVideoBtn = document.getElementById('sendVideoBtn');
     const goLiveBtn = document.getElementById('goLiveBtn');
     const genericFileInput = document.getElementById('genericFileInput');
     const imageInputFile = document.getElementById('imageInputFile');
+    const videoInputFile = document.getElementById('videoInputFile');
     const aboutBtn = document.getElementById('aboutBtn');
     const aboutModal = document.getElementById('aboutModal');
     const closeModalBtn = document.getElementById('closeModalBtn');
@@ -428,6 +437,7 @@
     const nicknameModal = document.getElementById('nicknameModal');
     const nicknameInput = document.getElementById('nicknameInput');
     const saveNicknameBtn = document.getElementById('saveNicknameBtn');
+    const resetNicknameBtn = document.getElementById('resetNicknameBtn');
     const walletBtn = document.getElementById('walletBtn');
 
 
@@ -570,6 +580,33 @@
                     </div>
                     <button class="file-button" data-file-id="${fileId}" ${isOwnFile ? 'disabled' : ''}>${isOwnFile ? 'Disponível' : 'Download'}</button>
                 </div>`;
+            if (!isOwnFile) {
+                incomingFiles.set(fileId, {
+                    metadata: message.metadata,
+                    pieces: new Array(message.metadata.pieceHashes.length).fill(null),
+                    receivedCount: 0
+                });
+            }
+        } else if (message.type === 'video_announce') {
+            const { fileId, fileName, fileSize } = message.metadata;
+            const isOwnFile = metadata.publisherId === myPublisherId;
+            const receiverButton = `
+                <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                    </svg>
+                    <span>Play</span>
+                </button>`;
+            
+            contentHTML = `
+                <div class="file-container" id="video-container-${fileId}">
+                    <div>
+                        <div class="font-semibold">${fileName}</div>
+                        <div class="text-xs text-gray-400">${(fileSize / 1024 / 1024).toFixed(2)} MB</div>
+                    </div>
+                    ${isOwnFile ? `<button class="file-button" data-file-id="${fileId}" disabled>Disponível</button>` : receiverButton}
+                </div>`;
+
             if (!isOwnFile) {
                 incomingFiles.set(fileId, {
                     metadata: message.metadata,
@@ -1029,6 +1066,12 @@
             userInfo.classList.remove('hidden');
             updateStatus('bg-green-500');
 
+            if (myRealAddress) {
+                walletBtn.title = 'Disconnect Wallet';
+            } else {
+                walletBtn.title = 'Connect Wallet';
+            }
+
             await streamr.subscribe(CHAT_STREAM_ID, addMessageToUI);
             await streamr.subscribe(IMAGE_STREAM_ID, handleImageMessage);
             await streamr.subscribe(FILE_STREAM_ID, handleFileStreamMessage);
@@ -1191,25 +1234,6 @@
         }
     }
 
-    // MODIFIED: This function now only handles announcing the file after metadata is generated
-    async function announceFileWithMetadata(fileData, metadata) {
-        if (!streamr) return;
-        try {
-            localFiles.set(metadata.fileId, { fileData, metadata });
-            const messageId = crypto.randomUUID();
-            await streamr.publish(CHAT_STREAM_ID, { 
-                type: 'file_announce', 
-                metadata, 
-                id: messageId,
-                nickname: myNickname,
-                realAddress: myRealAddress 
-            });
-        } catch (error) {
-            console.error("Failed to announce file:", error);
-            showCustomAlert('Erro', `Falha ao anunciar o ficheiro ${metadata.fileName}.`);
-        }
-    }
-
     function startDownload(fileId) {
         const transfer = incomingFiles.get(fileId);
         if (!transfer) {
@@ -1261,11 +1285,18 @@
         const transfer = incomingFiles.get(fileId);
         if (!transfer) return;
         
-        const blob = new Blob(transfer.pieces, { type: 'application/octet-stream' });
+        const blob = new Blob(transfer.pieces, { type: transfer.metadata.fileType || 'application/octet-stream' });
 
         if (blob) {
             const url = URL.createObjectURL(blob);
-            updateFileUI(fileId, 'Guardar Ficheiro', true, url, transfer.metadata.fileName);
+            if (transfer.metadata.fileType && transfer.metadata.fileType.startsWith('video/')) {
+                const container = document.getElementById(`video-container-${fileId}`);
+                if (container) {
+                    container.innerHTML = `<video controls autoplay class="max-w-xs rounded-md" src="${url}"></video>`;
+                }
+            } else {
+                updateFileUI(fileId, 'Guardar Ficheiro', true, url, transfer.metadata.fileName);
+            }
         } else {
             updateFileUI(fileId, 'Erro na Montagem');
         }
@@ -1483,6 +1514,7 @@
     // --- EVENT LISTENERS ---
     function setupEventListeners() {
         sendImageBtn.addEventListener('click', () => imageInputFile.click());
+        sendVideoBtn.addEventListener('click', () => videoInputFile.click());
         sendFileBtn.addEventListener('click', () => genericFileInput.click());
 
         function handleFileSelection(event) {
@@ -1497,6 +1529,7 @@
         }
 
         imageInputFile.addEventListener('change', handleFileSelection);
+        videoInputFile.addEventListener('change', handleFileSelection);
         genericFileInput.addEventListener('change', handleFileSelection);
 
         cancelSendBtn.addEventListener('click', () => {
@@ -1533,7 +1566,35 @@
                         console.error(`Failed to send image:`, error);
                     }
                 });
-            } else {
+            } else if (file.type.startsWith('video/')) {
+                const tempId = 'temp-file-' + crypto.randomUUID();
+                const localUrl = URL.createObjectURL(file);
+
+                // 1. Create a temporary UI message with a local preview and spinner
+                const tempMsgDiv = document.createElement('div');
+                tempMsgDiv.id = tempId;
+                tempMsgDiv.className = 'message-entry own-message';
+                tempMsgDiv.innerHTML = `
+                    <div class="message-bubble">
+                        <div class="message-content">
+                            <video controls muted class="max-w-xs rounded-md" src="${localUrl}"></video>
+                            <div class="processing-indicator flex items-center text-xs text-gray-400 mt-2">
+                                <div class="spinner mr-2"></div>
+                                <span>A processar e a enviar...</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                messagesContainer.appendChild(tempMsgDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+                // 2. Convert file to a buffer and send it to the worker
+                const fileBuffer = await file.arrayBuffer();
+                const fileData = { buffer: fileBuffer, name: file.name, size: file.size, type: file.type };
+                
+                // 3. The worker will process it. We pass tempId to identify the preview UI to update later.
+                fileWorker.postMessage({ fileData, tempId });
+            } else { // Generic files
                 // 1. Create a temporary UI message to show processing is happening
                 const tempId = 'temp-file-' + crypto.randomUUID();
                 const tempMsgDiv = document.createElement('div');
@@ -1773,6 +1834,17 @@
             }
         });
 
+        resetNicknameBtn.addEventListener('click', () => {
+            const nicknameKey = myRealAddress || myPublisherId;
+            myNickname = '';
+            localStorage.removeItem(`nickname_${nicknameKey}`);
+            userNicknames.delete(nicknameKey);
+            userIdDisplay.textContent = myRealAddress || myPublisherId;
+            publishPresence();
+            nicknameModal.classList.add('hidden');
+            nicknameInput.value = '';
+        });
+
         nicknameModal.addEventListener('click', (e) => {
             if (e.target === nicknameModal) {
                 nicknameModal.classList.add('hidden');
@@ -1886,6 +1958,7 @@
                     fileId: crypto.randomUUID(),
                     fileName: fileData.name,
                     fileSize: fileData.size,
+                    fileType: fileData.type,
                     pieceHashes: pieceHashes
                 };
                 
@@ -1897,17 +1970,96 @@
         const blob = new Blob([workerCode], { type: 'application/javascript' });
         fileWorker = new Worker(URL.createObjectURL(blob));
 
-        fileWorker.onmessage = (event) => {
+        fileWorker.onmessage = async (event) => {
             const { status, metadata, fileData, tempId } = event.data;
             if (status === 'complete') {
-                // O worker terminou. Agora, anuncia o ficheiro na thread principal.
+                 // Worker is done. Announce the file and finalize the sender's UI.
+        
+                // A. Store file locally for sending pieces on request
+                localFiles.set(metadata.fileId, { fileData, metadata });
+                
+                // B. Generate a final, permanent message ID
+                const messageId = crypto.randomUUID();
+                const messageType = metadata.fileType.startsWith('video/') ? 'video_announce' : 'file_announce';
+
+                // C. Publish the announcement to the network for others
+                try {
+                    await streamr.publish(CHAT_STREAM_ID, { 
+                        type: messageType, 
+                        metadata, 
+                        id: messageId,
+                        nickname: myNickname,
+                        realAddress: myRealAddress 
+                    });
+                } catch (error) {
+                    console.error(`Failed to announce ${metadata.fileType}:`, error);
+                    showCustomAlert('Error', `Failed to announce file ${metadata.fileName}.`);
+                    const tempElement = document.getElementById(tempId);
+                    if(tempElement) {
+                        tempElement.querySelector('.message-content').innerHTML = `<span class="text-red-500">Failed to send ${metadata.fileName}</span>`;
+                    }
+                    return;
+                }
+
+                // D. Find the temporary UI element and update it to its final state
                 const tempElement = document.getElementById(tempId);
                 if (tempElement) {
-                   tempElement.remove(); // Remove a mensagem "A processar..."
+                    tempElement.id = `msg-${messageId}`; // Set final ID
+                    tempElement.dataset.sessionId = myPublisherId;
+
+                    let finalContentHTML = '';
+                    
+                    if (messageType === 'video_announce') {
+                        // For videos, we just need to remove the spinner. The preview is already there.
+                        const videoPreview = tempElement.querySelector('video');
+                        finalContentHTML = `<video controls muted class="max-w-xs rounded-md" src="${videoPreview.src}"></video>`;
+
+                        // Clean up the local URL to prevent memory leaks
+                        URL.revokeObjectURL(videoPreview.src);
+                    } else { // Generic file
+                        const { fileName, fileSize } = metadata;
+                        finalContentHTML = `
+                            <div class="file-container">
+                                <div>
+                                    <div class="font-semibold">${fileName}</div>
+                                    <div class="text-xs text-gray-400">${(fileSize / 1024 / 1024).toFixed(2)} MB</div>
+                                </div>
+                                <button class="file-button" data-file-id="${metadata.fileId}" disabled>Disponível</button>
+                            </div>`;
+                    }
+
+                    const timestamp = new Date().toLocaleTimeString();
+                    const userColor = getUserColor(myPublisherId);
+
+                    // Replace the "processing" bubble with the final bubble content
+                    tempElement.innerHTML = `
+                        <div class="message-bubble">
+                            <div class="flex justify-between items-center mb-1">
+                                <div class="user-info-header text-sm font-semibold break-words">
+                                    <span style="color: ${userColor};">${getDisplayName(myPublisherId)}</span>
+                                    <span class="verification-seal cursor-pointer">${myRealAddress ? '✅' : ''}</span>
+                                </div>
+                            </div>
+                            <div class="message-content">${finalContentHTML}</div>
+                            <div class="text-right text-xs text-gray-500 mt-1">${timestamp} <span class="message-seal cursor-pointer" data-seal-type="live">🛡️</span></div>
+                            <div class="message-actions">
+                                <div class="reply-button" data-message-id="${messageId}" title="Reply">↩️</div>
+                                <div class="react-button" data-message-id="${messageId}" title="React">😀</div>
+                            </div>
+                        </div>
+                        <div class="reactions-container" data-reactions-for="${messageId}"></div>
+                    `;
+                    
+                    const standardizedMessage = { 
+                        type: messageType, 
+                        metadata, 
+                        id: messageId, 
+                        timestamp: Date.now(), 
+                        userId: myPublisherId 
+                    };
+                    lastMessages.push(standardizedMessage);
+                    if (lastMessages.length > MAX_MESSAGES) lastMessages.shift();
                 }
-                
-                // Chama a função para anunciar o ficheiro com os metadados pré-calculados
-                announceFileWithMetadata(fileData, metadata);
             }
         };
 
@@ -1945,3 +2097,8 @@
 </script>
 </body>
 </html>
+
+
+
+
+
