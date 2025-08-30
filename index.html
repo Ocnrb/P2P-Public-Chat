@@ -80,7 +80,7 @@
 <body class="min-h-screen">
 
 <!-- Main Chat UI -->
-<div id="chatUI" class="w-full flex flex-col h-screen bg-[#1b1b1b] hidden">
+<div id="chatUI" class="w-full flex flex-col bg-[#1b1b1b] hidden">
     <div class="px-4 pt-4 flex flex-col flex-1 min-h-0">
         <div class="flex flex-wrap items-center justify-between gap-x-4 mb-4">
             <h1 class="text-2xl sm:text-3xl font-bold text-white flex-shrink-0">Public Chat</h1>
@@ -100,7 +100,6 @@
                 <div class="w-px h-6 bg-gray-700 hidden sm:block"></div>
 
                 <div class="flex items-center gap-2 sm:gap-4">
-                    <div id="status-indicator" class="w-4 h-4 rounded-full bg-yellow-500 animate-pulse flex-shrink-0"></div>
                     <button id="walletBtn" class="text-gray-400 hover:text-white transition-colors" title="Connect Wallet">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
                     </button>
@@ -118,7 +117,7 @@
                 <span id="user-id" class="font-mono text-cyan-400 text-xs truncate"></span>
             </div>
         </div>
-        <div class="flex-1 mb-4 overflow-y-auto px-4 rounded-lg flex flex-col" id="messagesContainer"></div>
+        <div class="flex-1 mb-1 overflow-y-auto px-4 rounded-lg flex flex-col" id="messagesContainer"></div>
         
         <div id="replying-to-container" class="p-3 border-t border-gray-700 hidden">
             <div class="bg-[#2a2a2a] p-2 rounded-lg relative">
@@ -130,7 +129,7 @@
             </div>
         </div>
 
-        <div class="relative flex items-center p-4">
+        <div class="relative flex items-center px-4 py-2">
             <input type="file" id="genericFileInput" class="hidden">
             <input type="file" id="imageInputFile" accept="image/*" class="hidden">
             <input type="file" id="videoInputFile" accept="video/*" class="hidden">
@@ -338,6 +337,7 @@
     const AUDIO_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app6';
     const REACTION_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app7';
     const TYPING_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app8';
+    const FILE_META_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app9'; // NEW
     const MAX_MESSAGES = 500;
     const ONLINE_TIMEOUT = 15 * 1000;
     const IMAGE_MAX_WIDTH = 640;
@@ -360,6 +360,7 @@
     let loadedImages = new Map();
     let localFiles = new Map();
     let incomingFiles = new Map();
+    let fileSeeders = new Map(); // NEW: Map<fileId, Set<seederId>>
     let localMediaStream = null;
     let videoStreamInterval = null;
     let currentLiveStreamId = null;
@@ -387,7 +388,6 @@
     const loadingContent = document.getElementById('loadingContent');
     const connectWalletBtn = document.getElementById('connectWalletBtn');
     const guestBtn = document.getElementById('guestBtn');
-    const statusIndicator = document.getElementById('status-indicator');
     const messagesContainer = document.getElementById('messagesContainer');
     const messageInput = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
@@ -495,11 +495,6 @@
         customAlertModal.classList.remove('hidden');
     }
 
-    function updateStatus(colorClass) {
-        statusIndicator.className = `w-4 h-4 rounded-full ${colorClass} flex-shrink-0 mt-2 sm:mt-0`;
-        if (colorClass !== 'bg-yellow-500') statusIndicator.classList.remove('animate-pulse');
-    }
-    
     function setLoginModalState(state) {
         if (state === 'loading') {
             loginContent.classList.add('hidden');
@@ -575,42 +570,11 @@
              if (isHistorical) {
                  requestData('image', message.imageId);
              }
-        } else if (message.type === 'file_announce') {
+        } else if (message.type === 'file_announce' || message.type === 'video_announce') {
             const { fileId, fileName, fileSize } = message.metadata;
             const isOwnFile = metadata.publisherId === myPublisherId;
-            const senderButton = `
-                <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                    </svg>
-                    <span>Seeding</span>
-                </button>`;
+            const isVideo = message.type === 'video_announce';
 
-            contentHTML = `
-                <div class="file-container">
-                    <div>
-                        <div class="font-semibold">${fileName}</div>
-                        <div class="text-xs text-gray-400">${(fileSize / 1024 / 1024).toFixed(2)} MB</div>
-                    </div>
-                    ${isOwnFile ? senderButton : `<button class="file-button" data-file-id="${fileId}">Download</button>`}
-                </div>`;
-            if (!isOwnFile) {
-                incomingFiles.set(fileId, {
-                    metadata: message.metadata,
-                    pieces: new Array(message.metadata.pieceHashes.length).fill(null),
-                    receivedCount: 0
-                });
-            }
-        } else if (message.type === 'video_announce') {
-            const { fileId, fileName, fileSize } = message.metadata;
-            const isOwnFile = metadata.publisherId === myPublisherId;
-            const receiverButton = `
-                <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
-                    </svg>
-                    <span>Play</span>
-                </button>`;
             const senderButton = `
                 <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
@@ -619,13 +583,31 @@
                     <span>Seeding</span>
                 </button>`;
             
+            const playButton = `
+                 <button class="file-button flex items-center justify-center gap-2" data-action="start-download" data-file-id="${fileId}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                    </svg>
+                    <span>Play</span>
+                </button>
+            `;
+
+            const downloadButton = `<button class="file-button" data-action="start-download" data-file-id="${fileId}">Download</button>`;
+
+            const receiverInteractionHTML = `
+                <div id="file-interaction-${fileId}" class="flex items-center gap-2">
+                    ${isVideo ? playButton : downloadButton}
+                     <span class="seeder-count text-xs text-gray-500" data-file-id="${fileId}"></span>
+                </div>
+            `;
+
             contentHTML = `
                 <div class="file-container" id="video-container-${fileId}">
                     <div>
                         <div class="font-semibold">${fileName}</div>
                         <div class="text-xs text-gray-400">${(fileSize / 1024 / 1024).toFixed(2)} MB</div>
                     </div>
-                    ${isOwnFile ? senderButton : receiverButton}
+                    ${isOwnFile ? senderButton : receiverInteractionHTML}
                 </div>`;
 
             if (!isOwnFile) {
@@ -634,6 +616,7 @@
                     pieces: new Array(message.metadata.pieceHashes.length).fill(null),
                     receivedCount: 0
                 });
+                requestFileSources(fileId);
             }
         } else if (message.type === 'start_stream') {
             msgDiv.classList.add('message-entry-wide');
@@ -720,22 +703,6 @@
         }
     }
     
-    function updateFileUI(fileId, text, isLink = false, url = '', filename = '') {
-        const button = document.querySelector(`[data-file-id="${fileId}"]`);
-        if (button) {
-            if (isLink) {
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = filename;
-                link.textContent = text;
-                link.className = button.className;
-                button.parentNode.replaceChild(link, button);
-            } else {
-                button.textContent = text;
-            }
-        }
-    }
-
     function updateReactionsUI(messageId) {
         const container = document.querySelector(`[data-reactions-for="${messageId}"]`);
         if (!container) return;
@@ -952,7 +919,7 @@
     async function handleFileStreamMessage(message, metadata) {
         try {
             if (message.type === 'piece_request') {
-                if (localFiles.has(message.fileId)) {
+                if (localFiles.has(message.fileId) && message.targetSeederId === myPublisherId) {
                     await sendPiece(message.fileId, message.pieceIndex);
                 }
             } else if (message.type === 'file_piece') {
@@ -979,7 +946,14 @@
                 transfer.receivedCount++;
 
                 const progress = Math.round((transfer.receivedCount / transfer.metadata.pieceHashes.length) * 100);
-                updateFileUI(fileId, `Receiving... ${progress}%`);
+                const receivedMB = (transfer.receivedCount * PIECE_SIZE / 1024 / 1024).toFixed(2);
+                const totalMB = (transfer.metadata.fileSize / 1024 / 1024).toFixed(2);
+                const progressText = `Receiving... ${progress}% (${receivedMB}MB / ${totalMB}MB)`;
+                
+                const progressElement = document.querySelector(`#file-interaction-${fileId} .progress-text`);
+                if (progressElement) {
+                    progressElement.textContent = progressText;
+                }
 
                 if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
                     assembleFile(fileId);
@@ -994,6 +968,52 @@
             console.error("Error in handleFileStreamMessage:", error);
         }
     }
+    
+    // NEW: Handles messages on the file metadata stream
+    async function handleFileMetaMessage(message, metadata) {
+        if (message.type === 'source_request') {
+            if (localFiles.has(message.fileId) && metadata.publisherId !== myPublisherId) {
+                await announceFileSource(message.fileId);
+            }
+        } else if (message.type === 'source_announce') {
+            const seeders = fileSeeders.get(message.fileId);
+            if (seeders) { 
+                seeders.add(metadata.publisherId);
+                const seederCountElement = document.querySelector(`.seeder-count[data-file-id="${message.fileId}"]`);
+                if (seederCountElement) {
+                    seederCountElement.textContent = `(${seeders.size} seeders)`;
+                }
+            }
+        }
+    }
+    
+    // NEW: Announce that this client is a source for a file
+    async function announceFileSource(fileId) {
+        if (!streamr) return;
+        try {
+            await streamr.publish(FILE_META_STREAM_ID, {
+                type: 'source_announce',
+                fileId: fileId,
+            });
+        } catch (err) {
+            console.error(`Failed to announce source for ${fileId}`, err);
+        }
+    }
+
+    // NEW: Request sources for a file from the network
+    async function requestFileSources(fileId) {
+        if (!streamr) return;
+        fileSeeders.set(fileId, new Set());
+        try {
+            await streamr.publish(FILE_META_STREAM_ID, {
+                type: 'source_request',
+                fileId: fileId,
+            });
+        } catch (err) {
+            console.error(`Failed to request sources for ${fileId}`, err);
+        }
+    }
+
 
     function handleVideoStreamMessage(message) {
         const canvas = document.getElementById(`stream-${message.streamId}`);
@@ -1086,7 +1106,6 @@
             chatUI.classList.remove('hidden');
             userIdDisplay.textContent = myNickname || myRealAddress || myPublisherId;
             userInfo.classList.remove('hidden');
-            updateStatus('bg-green-500');
 
             if (myRealAddress) {
                 walletBtn.title = 'Disconnect Wallet';
@@ -1101,6 +1120,7 @@
             await streamr.subscribe(AUDIO_STREAM_ID, handleAudioStreamMessage);
             await streamr.subscribe(REACTION_STREAM_ID, handleReactionMessage);
             await streamr.subscribe(TYPING_STREAM_ID, handleTypingMessage);
+            await streamr.subscribe(FILE_META_STREAM_ID, handleFileMetaMessage);
             await streamr.subscribe(METRICS_STREAM_ID, processMetricsMessage);
 
             activeUsers.set(myPublisherId, { lastActive: Date.now() });
@@ -1112,7 +1132,6 @@
                 updateTypingIndicatorUI();
             }, 3000);
         } catch (error) {
-            updateStatus('bg-red-500');
             throw new Error(`Could not initialize chat. ${error.message}`);
         }
     }
@@ -1262,14 +1281,83 @@
             console.error(`[Receiver] No transfer info found for file ${fileId}`);
             return;
         }
-        updateFileUI(fileId, "Requesting...");
+
+        const seeders = fileSeeders.get(fileId);
+        if (!seeders || seeders.size === 0) {
+            console.error(`[Receiver] No seeders found for file ${fileId}, cannot start download.`);
+            const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
+            if (interactionContainer) {
+                interactionContainer.innerHTML = `<span class="text-xs text-yellow-500">No seeders online.</span>`;
+            }
+            return;
+        }
+
+        const seederId = seeders.values().next().value;
+        transfer.currentSeeder = seederId;
+        
+        const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
+        if (interactionContainer) {
+            interactionContainer.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <span class="progress-text text-xs text-gray-400">Requesting...</span>
+                    <button class="cancel-download-btn text-gray-400 hover:text-white" title="Cancel Download" data-action="cancel-download" data-file-id="${fileId}">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>
+                    </button>
+                </div>
+            `;
+        }
+
         requestPiece(fileId, 0);
+    }
+    
+    // NEW: Cancel an in-progress download
+    function cancelDownload(fileId) {
+        if (incomingFiles.has(fileId)) {
+            incomingFiles.delete(fileId);
+            
+            const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
+            const messageDiv = interactionContainer.closest('.message-entry');
+            const isVideo = messageDiv.querySelector('[id^="video-container-"]') !== null;
+
+            if (interactionContainer) {
+                const playButton = `
+                    <button class="file-button flex items-center justify-center gap-2" data-action="start-download" data-file-id="${fileId}">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                        </svg>
+                        <span>Play</span>
+                    </button>`;
+                const downloadButton = `<button class="file-button" data-action="start-download" data-file-id="${fileId}">Download</button>`;
+                interactionContainer.innerHTML = `
+                    ${isVideo ? playButton : downloadButton}
+                    <span class="seeder-count text-xs text-gray-500" data-file-id="${fileId}"></span>
+                `;
+            }
+        }
     }
 
     async function requestPiece(fileId, pieceIndex) {
         if (!streamr) return;
+        
+        const transfer = incomingFiles.get(fileId);
+
+        if (!transfer) {
+            return;
+        }
+        
+        const seederId = transfer.currentSeeder;
+        if (!seederId) {
+            console.error(`[Receiver] No seeder assigned for file ${fileId}. Cannot request piece.`);
+            return;
+        }
+        
         try {
-            await streamr.publish(FILE_STREAM_ID, { type: 'piece_request', fileId, pieceIndex });
+            await streamr.publish(FILE_STREAM_ID, { 
+                type: 'piece_request', 
+                fileId, 
+                pieceIndex,
+                targetSeederId: seederId 
+            });
         } catch (error) {
             console.error(`[Receiver] Failed to request piece ${pieceIndex}:`, error);
         }
@@ -1307,9 +1395,13 @@
         const transfer = incomingFiles.get(fileId);
         if (!transfer) return;
 
+        const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
+
         const blob = new Blob(transfer.pieces, { type: transfer.metadata.fileType || 'application/octet-stream' });
         if (!blob) {
-            updateFileUI(fileId, 'Assembly Error');
+             if (interactionContainer) {
+                interactionContainer.innerHTML = `<span class="text-red-500 text-xs">Assembly Error</span>`;
+            }
             return;
         }
 
@@ -1338,10 +1430,8 @@
         } else {
             // For generic files, keep the "Save File" workflow
             transfer.blob = blob;
-            const button = document.querySelector(`[data-file-id="${fileId}"]`);
-            if (button) {
-                button.textContent = 'Save File';
-                button.dataset.action = 'save';
+            if (interactionContainer) {
+                 interactionContainer.innerHTML = `<button class="file-button" data-action="save" data-file-id="${fileId}">Save File</button>`;
             }
         }
     }
@@ -1557,6 +1647,17 @@
 
     // --- EVENT LISTENERS ---
     function setupEventListeners() {
+        // NEW: Adjust chat height for mobile keyboards and viewport changes
+        function adjustChatHeight() {
+            chatUI.style.height = `${window.innerHeight}px`;
+            // Scroll to the bottom of messages when height adjusts, e.g., keyboard appears
+            if (messagesContainer) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+        window.addEventListener('resize', adjustChatHeight);
+        adjustChatHeight(); // Initial call
+
         sendImageBtn.addEventListener('click', () => {
             selectedFileIntent = 'image';
             imageInputFile.click();
@@ -1740,19 +1841,22 @@
                     }
                 }
             }
+            
+            const fileButton = target.closest('button[data-file-id]');
+            if (fileButton) {
+                const fileId = fileButton.dataset.fileId;
+                const action = fileButton.dataset.action;
 
-            const button = e.target.closest('.file-button');
-            if (button && !button.disabled) {
-                e.preventDefault();
-                const fileId = button.dataset.fileId;
-                const action = button.dataset.action || 'download';
-
-                if (action === 'download') {
+                if (action === 'start-download') {
+                    e.preventDefault();
                     startDownload(fileId);
+                } else if (action === 'cancel-download') {
+                    e.preventDefault();
+                    cancelDownload(fileId);
                 } else if (action === 'save') {
+                    e.preventDefault();
                     const transfer = incomingFiles.get(fileId);
                     if (transfer && transfer.blob) {
-                        // 1. Trigger save dialog
                         const url = URL.createObjectURL(transfer.blob);
                         const tempLink = document.createElement('a');
                         tempLink.href = url;
@@ -1760,41 +1864,27 @@
                         document.body.appendChild(tempLink);
                         tempLink.click();
                         document.body.removeChild(tempLink);
+                        URL.revokeObjectURL(url);
 
-                        // 2. Become a seeder for this file
                         const fileBuffer = await transfer.blob.arrayBuffer();
                         const fileData = { buffer: fileBuffer, name: transfer.metadata.fileName, size: transfer.metadata.fileSize, type: transfer.metadata.fileType };
                         localFiles.set(fileId, { fileData, metadata: transfer.metadata });
 
-                        // 3. Update UI to final state (Seeding / Video Player)
-                        if (transfer.metadata.fileType && transfer.metadata.fileType.startsWith('video/')) {
-                            const container = document.getElementById(`video-container-${fileId}`);
-                            if (container) {
-                                 // The URL is already created, we can reuse it
-                                 container.innerHTML = `
-                                    <div class="relative">
-                                        <video controls autoplay class="max-w-xs rounded-md" src="${url}"></video>
-                                        <div class="absolute top-2 left-2 bg-black bg-opacity-60 text-white text-xs rounded-md px-2 py-1 flex items-center">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse mr-2" viewBox="0 0 20 20" fill="currentColor">
-                                                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                                            </svg>
-                                            <span>Seeding</span>
-                                        </div>
-                                    </div>`;
-                            }
-                        } else {
-                            URL.revokeObjectURL(url); // Revoke for non-video files
-                            button.innerHTML = `
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
-                                    <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                                </svg>
-                                <span>Seeding</span>`;
-                            button.disabled = true;
-                            button.classList.add('flex', 'items-center', 'justify-center', 'gap-2');
+                        const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
+                        if (interactionContainer) {
+                            interactionContainer.innerHTML = `
+                                <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                                    </svg>
+                                    <span>Seeding</span>
+                                </button>
+                            `;
                         }
                     }
                 }
             }
+
 
             const actionsContainer = target.closest('.message-actions');
             if (actionsContainer) {
@@ -2023,9 +2113,9 @@
     // --- NEW: WEB WORKER SETUP ---
     function setupFileWorker() {
         const workerCode = `
-            // Este código corre na thread do worker (em segundo plano)
+            // This code runs in the worker thread (in the background)
             
-            // Função para calcular o hash SHA-1 de um ArrayBuffer
+            // Function to calculate the SHA-1 hash of an ArrayBuffer
             async function calculateSHA1(buffer) {
                 const hashBuffer = await crypto.subtle.digest('SHA-1', buffer);
                 const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -2055,7 +2145,7 @@
                     pieceHashes: pieceHashes
                 };
                 
-                // Envia os metadados finais de volta para a thread principal
+                // Send the final metadata back to the main thread
                 self.postMessage({ status: 'complete', metadata: metadata, fileData: fileData, tempId: tempId, intent: intent });
             };
         `;
@@ -2213,13 +2303,4 @@
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
 
