@@ -338,11 +338,11 @@
     const AUDIO_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app6';
     const REACTION_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app7';
     const TYPING_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app8';
-    const MAX_MESSAGES = 200;
-    const ONLINE_TIMEOUT = 20 * 1000;
-    const IMAGE_MAX_WIDTH = 500;
-    const PIECE_SIZE =  64 * 1024; // 64 KB for reliability
-    const TYPING_INDICATOR_TIMEOUT = 3000; // 3 seconds
+    const MAX_MESSAGES = 500;
+    const ONLINE_TIMEOUT = 15 * 1000;
+    const IMAGE_MAX_WIDTH = 640;
+    const PIECE_SIZE =  128 * 1024; // 64 KB for reliability
+    const TYPING_INDICATOR_TIMEOUT = 1000; // 1 seconds
 
     // --- STATE VARIABLES ---
     let streamr;
@@ -2213,6 +2213,7 @@
 </script>
 </body>
 </html>
+
 
 
 
