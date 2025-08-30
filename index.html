@@ -513,11 +513,17 @@
                 if (event.data.frame) {
                     try {
                         const response = await fetch(event.data.frame);
+                        if (!response.ok) {
+                           throw new Error('Failed to fetch frame data');
+                        }
                         const blob = await response.blob();
+                         if (blob.size === 0) {
+                            return;
+                        }
                         const imageBitmap = await createImageBitmap(blob);
                         self.postMessage({ imageBitmap: imageBitmap }, [imageBitmap]);
                     } catch (e) {
-                        // Errors in the worker are sometimes expected (e.g., during shutdown)
+                        console.error('Error decoding frame in viewer worker:', e);
                     }
                 }
             };
@@ -540,17 +546,33 @@
     // NEW: Creates a worker for encoding video frames off the main thread
     function createStreamerWorker(options) {
         const workerCode = `
-            let canvas;
-            let ctx;
+            const width = ${options.width};
+            const height = ${options.height};
             const quality = ${options.jpegQuality};
+            const canvas = new OffscreenCanvas(width, height);
+            const ctx = canvas.getContext('2d');
             
             self.onmessage = async (event) => {
                 if (event.data.bitmap) {
-                    if (!canvas) {
-                        canvas = new OffscreenCanvas(event.data.bitmap.width, event.data.bitmap.height);
-                        ctx = canvas.getContext('2d');
+                    // This scales the image to fit, maintaining aspect ratio and centering it.
+                    const videoRatio = event.data.bitmap.width / event.data.bitmap.height;
+                    const canvasRatio = width / height;
+                    let drawWidth, drawHeight, x, y;
+
+                    if (videoRatio > canvasRatio) { 
+                        drawWidth = width;
+                        drawHeight = width / videoRatio;
+                        x = 0;
+                        y = (height - drawHeight) / 2;
+                    } else {
+                        drawHeight = height;
+                        drawWidth = height * videoRatio;
+                        y = 0;
+                        x = (width - drawWidth) / 2;
                     }
-                    ctx.drawImage(event.data.bitmap, 0, 0);
+                    
+                    ctx.clearRect(0, 0, width, height);
+                    ctx.drawImage(event.data.bitmap, x, y, drawWidth, drawHeight);
                     event.data.bitmap.close();
                     
                     const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: quality });
@@ -567,7 +589,15 @@
         const worker = new Worker(URL.createObjectURL(blob));
         worker.onmessage = (event) => {
              if (streamr && currentLiveStreamId && event.data.frame) {
-                streamr.publish(VIDEO_STREAM_ID, { streamId: currentLiveStreamId, frame: event.data.frame });
+                const frameData = event.data.frame;
+                // 1. Publish to network for others
+                streamr.publish(VIDEO_STREAM_ID, { streamId: currentLiveStreamId, frame: frameData });
+                
+                // 2. Local loopback to render on our own screen
+                const localStreamInfo = remoteStreams.get(currentLiveStreamId);
+                if (localStreamInfo && localStreamInfo.videoWorker) {
+                    localStreamInfo.videoWorker.postMessage({ frame: frameData });
+                }
             }
         };
          worker.onerror = (error) => {
@@ -735,7 +765,7 @@
         messagesContainer.appendChild(msgDiv);
         updateReactionsUI(messageId);
 
-        if (message.type === 'start_stream' && metadata.publisherId !== myPublisherId) {
+        if (message.type === 'start_stream') {
             const canvas = document.getElementById(`stream-${message.streamId}`);
             if (canvas) {
                 const ctx = canvas.getContext('2d');
@@ -2331,3 +2361,4 @@
 </script>
 </body>
 </html>
+
