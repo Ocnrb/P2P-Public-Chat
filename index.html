@@ -346,21 +346,22 @@
 
     // --- STATE VARIABLES ---
     let streamr;
-    let fileWorker; // NEW: Worker for file processing
+    let fileWorker;
+    let streamerWorker; // NEW
     let myPublisherId = '';
     let myNickname = '';
     let myRealAddress = '';
     let userNicknames = new Map();
     let userRealAddresses = new Map();
-    let verifiedRealAddresses = new Map(); // NEW: Store verified mappings
-    let userColors = new Map(); // NEW: Store user colors
+    let verifiedRealAddresses = new Map(); 
+    let userColors = new Map();
     let lastMessages = [];
     let messageCounter = 0;
     let activeUsers = new Map();
     let loadedImages = new Map();
     let localFiles = new Map();
     let incomingFiles = new Map();
-    let fileSeeders = new Map(); // NEW: Map<fileId, Set<seederId>>
+    let fileSeeders = new Map();
     let localMediaStream = null;
     let videoStreamInterval = null;
     let currentLiveStreamId = null;
@@ -373,7 +374,7 @@
     let replyingTo = null;
     let presenceInterval = null;
     let selectedFile = null;
-    let selectedFileIntent = 'file'; // 'file' or 'video'
+    let selectedFileIntent = 'file';
     let streamSettings = {
         width: 854,
         height: 480,
@@ -467,7 +468,6 @@
         return `${sessionId.slice(0, 6)}...${sessionId.slice(-4)}`;
     }
     
-    // CORRECTED: This function now gets the most persistent ID for color mapping
     function getColorKey(sessionId) {
         return userRealAddresses.get(sessionId) || sessionId;
     }
@@ -506,7 +506,76 @@
         loginModal.classList.remove('hidden');
     }
 
-    // MODIFIED: This function now shows the full publisher ID and moves the timestamp
+    // NEW: Creates a worker for decoding video frames off the main thread
+    function createVideoViewerWorker(canvasContext) {
+        const workerCode = `
+            self.onmessage = async (event) => {
+                if (event.data.frame) {
+                    try {
+                        const response = await fetch(event.data.frame);
+                        const blob = await response.blob();
+                        const imageBitmap = await createImageBitmap(blob);
+                        self.postMessage({ imageBitmap: imageBitmap }, [imageBitmap]);
+                    } catch (e) {
+                        // Errors in the worker are sometimes expected (e.g., during shutdown)
+                    }
+                }
+            };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const worker = new Worker(URL.createObjectURL(blob));
+        worker.onmessage = (event) => {
+            if (event.data.imageBitmap) {
+                canvasContext.clearRect(0, 0, canvasContext.canvas.width, canvasContext.canvas.height);
+                canvasContext.drawImage(event.data.imageBitmap, 0, 0, canvasContext.canvas.width, canvasContext.canvas.height);
+                event.data.imageBitmap.close(); // Release memory immediately
+            }
+        };
+        worker.onerror = (error) => {
+            console.error("Error in video viewer worker:", error);
+        };
+        return worker;
+    }
+    
+    // NEW: Creates a worker for encoding video frames off the main thread
+    function createStreamerWorker(options) {
+        const workerCode = `
+            let canvas;
+            let ctx;
+            const quality = ${options.jpegQuality};
+            
+            self.onmessage = async (event) => {
+                if (event.data.bitmap) {
+                    if (!canvas) {
+                        canvas = new OffscreenCanvas(event.data.bitmap.width, event.data.bitmap.height);
+                        ctx = canvas.getContext('2d');
+                    }
+                    ctx.drawImage(event.data.bitmap, 0, 0);
+                    event.data.bitmap.close();
+                    
+                    const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: quality });
+                    
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        self.postMessage({ frame: reader.result });
+                    };
+                    reader.readAsDataURL(blob);
+                }
+            };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const worker = new Worker(URL.createObjectURL(blob));
+        worker.onmessage = (event) => {
+             if (streamr && currentLiveStreamId && event.data.frame) {
+                streamr.publish(VIDEO_STREAM_ID, { streamId: currentLiveStreamId, frame: event.data.frame });
+            }
+        };
+         worker.onerror = (error) => {
+            console.error("Error in streamer worker:", error);
+        };
+        return worker;
+    }
+
     function addMessageToUI(message, metadata, isHistorical = false) {
         if (message.tempId) {
             const tempElement = document.getElementById(message.tempId);
@@ -519,7 +588,6 @@
         const existingMsg = document.getElementById(`msg-${messageId}`);
         if (existingMsg) {
             const existingSeal = existingMsg.querySelector('.message-seal');
-            // If the new message is LIVE and the existing one is HISTORICAL, we should replace it.
             if (!isHistorical && existingSeal && existingSeal.dataset.sealType === 'historical') {
                  existingMsg.remove();
             } else {
@@ -539,13 +607,13 @@
         let msgDiv = document.createElement('div');
         msgDiv.id = `msg-${messageId}`;
         msgDiv.className = 'message-entry';
-        msgDiv.dataset.sessionId = metadata.publisherId; // Add session ID for later updates
+        msgDiv.dataset.sessionId = metadata.publisherId;
         
         if (metadata.publisherId === myPublisherId) msgDiv.classList.add('own-message');
         else msgDiv.classList.add('other-message');
         
         const timestamp = new Date(metadata.timestamp).toLocaleTimeString();
-        const userColor = getUserColor(metadata.publisherId); // Get user color
+        const userColor = getUserColor(metadata.publisherId);
         const realAddress = verifiedRealAddresses.get(metadata.publisherId) || userRealAddresses.get(metadata.publisherId);
         const formattedId = realAddress ? `(${realAddress.slice(0, 6)}...${realAddress.slice(-4)})` : `(${metadata.publisherId.slice(0, 6)}...${metadata.publisherId.slice(-4)})`;
         const seal = isHistorical ? '🕒' : '🛡️';
@@ -630,9 +698,13 @@
                 </div>`;
         } else if (message.type === 'stop_stream') {
             contentHTML = `<div class="text-xs italic text-gray-500">Stream ended.</div>`;
-            if (remoteStreams.has(message.streamId)) {
-                if (remoteStreams.get(message.streamId).audioContext) {
-                    remoteStreams.get(message.streamId).audioContext.close();
+            const streamInfo = remoteStreams.get(message.streamId);
+            if (streamInfo) {
+                if (streamInfo.audioContext) {
+                    streamInfo.audioContext.close();
+                }
+                if (streamInfo.videoWorker) {
+                    streamInfo.videoWorker.terminate();
                 }
                 remoteStreams.delete(message.streamId);
             }
@@ -663,6 +735,15 @@
         messagesContainer.appendChild(msgDiv);
         updateReactionsUI(messageId);
 
+        if (message.type === 'start_stream' && metadata.publisherId !== myPublisherId) {
+            const canvas = document.getElementById(`stream-${message.streamId}`);
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                const videoWorker = createVideoViewerWorker(ctx);
+                remoteStreams.set(message.streamId, { videoWorker, audioContext: null });
+            }
+        }
+
         if (!isHistorical) {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
@@ -680,7 +761,6 @@
         }
     }
 
-    // MODIFIED: Applies color to user list
     function updateUserList() {
         const now = Date.now();
         const timeLimit = now - ONLINE_TIMEOUT;
@@ -1014,30 +1094,27 @@
         }
     }
 
-
+    // MODIFIED: Offloads frame decoding to a Web Worker
     function handleVideoStreamMessage(message) {
-        const canvas = document.getElementById(`stream-${message.streamId}`);
-        if (canvas) {
-            const ctx = canvas.getContext('2d');
-            const img = new Image();
-            img.onload = () => {
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            };
-            img.src = message.frame;
+        const streamInfo = remoteStreams.get(message.streamId);
+        if (streamInfo && streamInfo.videoWorker) {
+            streamInfo.videoWorker.postMessage({ frame: message.frame });
         }
     }
 
+    // MODIFIED: Safely initializes audio context
     function handleAudioStreamMessage(message) {
-        if (message.streamId === currentLiveStreamId) return; // Prevents audio feedback loop for the streamer
+        if (message.streamId === currentLiveStreamId) return; 
 
         let streamInfo = remoteStreams.get(message.streamId);
-        
         if (!streamInfo) {
-             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-             streamInfo = { audioContext: audioCtx, audioQueue: [] };
-             remoteStreams.set(message.streamId, streamInfo);
+            return;
         }
 
+        if (!streamInfo.audioContext) {
+             streamInfo.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
         const { audioContext } = streamInfo;
 
         if (audioContext.state === 'suspended') {
@@ -1136,7 +1213,6 @@
         }
     }
     
-    // --- WALLET CONNECTION FUNCTION (FINAL) ---
     async function connectWithWallet() {
         const injectedProvider = window.ethereum || window.top?.ethereum;
 
@@ -1183,7 +1259,6 @@
             
             localStorage.setItem('authMethod', 'metamask');
 
-            // NEW: Identity Proof
             const proofMsg = `Verifying ownership: My address ${myRealAddress} will be represented by session ${myPublisherId}`;
             const proofSignature = await signer.signMessage(proofMsg);
             await streamr.publish(METRICS_STREAM_ID, {
@@ -1310,7 +1385,6 @@
         requestPiece(fileId, 0);
     }
     
-    // NEW: Cancel an in-progress download
     function cancelDownload(fileId) {
         if (incomingFiles.has(fileId)) {
             incomingFiles.delete(fileId);
@@ -1405,14 +1479,11 @@
             return;
         }
 
-        // Check if the received file is a video from a "video_announce" message
         if (transfer.metadata.fileType && transfer.metadata.fileType.startsWith('video/')) {
-            // 1. Immediately become a seeder
             const fileBuffer = await blob.arrayBuffer();
             const fileData = { buffer: fileBuffer, name: transfer.metadata.fileName, size: transfer.metadata.fileSize, type: transfer.metadata.fileType };
             localFiles.set(fileId, { fileData, metadata: transfer.metadata });
             
-            // 2. Update UI to show video player
             const container = document.getElementById(`video-container-${fileId}`);
             if (container) {
                  const url = URL.createObjectURL(blob);
@@ -1428,7 +1499,6 @@
                     </div>`;
             }
         } else {
-            // For generic files, keep the "Save File" workflow
             transfer.blob = blob;
             if (interactionContainer) {
                  interactionContainer.innerHTML = `<button class="file-button" data-action="save" data-file-id="${fileId}">Save File</button>`;
@@ -1501,7 +1571,7 @@
     }
 
     async function startLiveStream(deviceId, options) {
-        if (localMediaStream) await stopLiveStream(); // Stop existing stream before starting a new one
+        if (localMediaStream) await stopLiveStream();
         if (!streamr) return;
         
         try {
@@ -1514,21 +1584,18 @@
                 audio: true
             };
 
-            try {
-                localMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-            } catch (err) {
+            localMediaStream = await navigator.mediaDevices.getUserMedia(constraints).catch(err => {
                 console.warn("Could not get audio and video, trying video only.", err);
                 delete constraints.audio;
-                localMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-            }
+                return navigator.mediaDevices.getUserMedia(constraints);
+            });
 
             localVideoPreview.srcObject = localMediaStream;
             videoPreviewModal.classList.remove('hidden');
 
-            const canvas = document.createElement('canvas');
-            canvas.width = options.width;
-            canvas.height = options.height;
-            const ctx = canvas.getContext('2d');
+            streamerWorker = createStreamerWorker(options);
+            const videoTrack = localMediaStream.getVideoTracks()[0];
+            const imageCapture = new ImageCapture(videoTrack);
             
             currentLiveStreamId = crypto.randomUUID();
             await streamr.publish(CHAT_STREAM_ID, { 
@@ -1539,33 +1606,13 @@
                 realAddress: myRealAddress
             });
 
-            videoStreamInterval = setInterval(() => {
-                // Aspect Ratio Correction
-                const videoWidth = localVideoPreview.videoWidth;
-                const videoHeight = localVideoPreview.videoHeight;
-                const canvasWidth = canvas.width;
-                const canvasHeight = canvas.height;
-                const videoRatio = videoWidth / videoHeight;
-                const canvasRatio = canvasWidth / canvasHeight;
-                let drawWidth, drawHeight, x, y;
-
-                if (videoRatio > canvasRatio) { // Video is wider than canvas
-                    drawWidth = canvasWidth;
-                    drawHeight = canvasWidth / videoRatio;
-                    x = 0;
-                    y = (canvasHeight - drawHeight) / 2;
-                } else { // Video is taller or same ratio
-                    drawHeight = canvasHeight;
-                    drawWidth = canvasHeight * videoRatio;
-                    y = 0;
-                    x = (canvasWidth - drawWidth) / 2;
+            videoStreamInterval = setInterval(async () => {
+                try {
+                    const imageBitmap = await imageCapture.grabFrame();
+                    streamerWorker.postMessage({ bitmap: imageBitmap }, [imageBitmap]);
+                } catch(e) {
+                    // console.error("Could not grab frame:", e);
                 }
-                
-                ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-                ctx.drawImage(localVideoPreview, x, y, drawWidth, drawHeight);
-
-                const frame = canvas.toDataURL('image/jpeg', options.jpegQuality);
-                streamr.publish(VIDEO_STREAM_ID, { streamId: currentLiveStreamId, frame });
             }, 1000 / options.frameRate);
 
             const audioTracks = localMediaStream.getAudioTracks();
@@ -1597,6 +1644,11 @@
     async function stopLiveStream() {
         if (videoStreamInterval) clearInterval(videoStreamInterval);
         videoStreamInterval = null;
+
+        if (streamerWorker) {
+            streamerWorker.terminate();
+            streamerWorker = null;
+        }
         
         if (audioProcessor) {
             audioProcessor.disconnect();
@@ -1624,7 +1676,6 @@
         }
     }
 
-    // MODIFIED: Applies color to reply snippet
     function startReply(messageId) {
         const message = lastMessages.find(m => (m.id || m.timestamp) == messageId);
         if (message) {
@@ -1647,16 +1698,14 @@
 
     // --- EVENT LISTENERS ---
     function setupEventListeners() {
-        // NEW: Adjust chat height for mobile keyboards and viewport changes
         function adjustChatHeight() {
             chatUI.style.height = `${window.innerHeight}px`;
-            // Scroll to the bottom of messages when height adjusts, e.g., keyboard appears
             if (messagesContainer) {
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
         }
         window.addEventListener('resize', adjustChatHeight);
-        adjustChatHeight(); // Initial call
+        adjustChatHeight();
 
         sendImageBtn.addEventListener('click', () => {
             selectedFileIntent = 'image';
@@ -1680,7 +1729,7 @@
                 confirmFileSize.textContent = `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB`;
                 fileConfirmModal.classList.remove('hidden');
                 attachMenu.classList.add('hidden');
-                event.target.value = ''; // Reset input
+                event.target.value = '';
             }
         }
 
@@ -1693,12 +1742,11 @@
             fileConfirmModal.classList.add('hidden');
         });
 
-        // MODIFIED: This listener now delegates file processing to the Web Worker
         confirmSendBtn.addEventListener('click', async () => {
             if (!selectedFile) return;
 
             const file = selectedFile;
-            selectedFile = null; // Clear after use
+            selectedFile = null;
             fileConfirmModal.classList.add('hidden');
 
             if (selectedFileIntent === 'image') {
@@ -1722,8 +1770,7 @@
                         console.error(`Failed to send image:`, error);
                     }
                 });
-            } else { // Generic files and videos are handled here
-                // 1. Create a temporary UI message to show processing is happening
+            } else { 
                 const tempId = 'temp-file-' + crypto.randomUUID();
                 
                 if (selectedFileIntent === 'video') {
@@ -1760,7 +1807,6 @@
                 const fileBuffer = await file.arrayBuffer();
                 const fileData = { buffer: fileBuffer, name: file.name, size: file.size, type: file.type };
                 
-                // 3. The worker will process it and its onmessage handler will announce the file
                 fileWorker.postMessage({ fileData, tempId, intent: selectedFileIntent });
             }
         });
@@ -2110,12 +2156,8 @@
         });
     }
 
-    // --- NEW: WEB WORKER SETUP ---
     function setupFileWorker() {
         const workerCode = `
-            // This code runs in the worker thread (in the background)
-            
-            // Function to calculate the SHA-1 hash of an ArrayBuffer
             async function calculateSHA1(buffer) {
                 const hashBuffer = await crypto.subtle.digest('SHA-1', buffer);
                 const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -2145,7 +2187,6 @@
                     pieceHashes: pieceHashes
                 };
                 
-                // Send the final metadata back to the main thread
                 self.postMessage({ status: 'complete', metadata: metadata, fileData: fileData, tempId: tempId, intent: intent });
             };
         `;
@@ -2156,16 +2197,11 @@
         fileWorker.onmessage = async (event) => {
             const { status, metadata, fileData, tempId, intent } = event.data;
             if (status === 'complete') {
-                 // Worker is done. Announce the file and finalize the sender's UI.
-        
-                // A. Store file locally for sending pieces on request
                 localFiles.set(metadata.fileId, { fileData, metadata });
                 
-                // B. Generate a final, permanent message ID
                 const messageId = crypto.randomUUID();
                 const messageType = intent === 'video' ? 'video_announce' : 'file_announce';
 
-                // C. Publish the announcement to the network for others
                 try {
                     await streamr.publish(CHAT_STREAM_ID, { 
                         type: messageType, 
@@ -2184,10 +2220,9 @@
                     return;
                 }
 
-                // D. Find the temporary UI element and update it to its final state
                 const tempElement = document.getElementById(tempId);
                 if (tempElement) {
-                    tempElement.id = `msg-${messageId}`; // Set final ID
+                    tempElement.id = `msg-${messageId}`;
                     tempElement.dataset.sessionId = myPublisherId;
 
                     const { fileName, fileSize } = metadata;
@@ -2228,15 +2263,12 @@
                             </div>`;
                     }
                     
-
                     const finalTimestamp = new Date().toLocaleTimeString();
                     const userColor = getUserColor(myPublisherId);
                     const isVerified = myRealAddress ? '✅' : '';
                     const hasNick = myNickname !== '';
                     const formattedId = myRealAddress ? `(${myRealAddress.slice(0, 6)}...${myRealAddress.slice(-4)})` : `(${myPublisherId.slice(0, 6)}...${myPublisherId.slice(-4)})`;
 
-
-                    // Replace the "processing" bubble with the final bubble content
                     tempElement.innerHTML = `
                         <div class="message-bubble">
                             <div class="flex justify-between items-center">
@@ -2276,7 +2308,6 @@
     }
 
     // --- INITIALIZATION LOGIC ---
-    // CORRECTED: This function now attempts to auto-connect if the user previously used a wallet.
     async function handlePageLoad() {
         setupFileWorker();
         setupEventListeners();
@@ -2284,16 +2315,13 @@
 
         if (preferredAuth === 'metamask') {
             try {
-                // Attempt to auto-connect. This will show the loading modal briefly.
                 await connectWithWallet();
             } catch (err) {
                 console.error("Auto-connect failed:", err);
-                // If it fails, clear the preference and show the login modal for manual login.
                 localStorage.removeItem('authMethod');
                 setLoginModalState('buttons');
             }
         } else {
-            // If no preferred method, just show the login modal.
             setLoginModalState('buttons');
         }
     }
@@ -2303,4 +2331,3 @@
 </script>
 </body>
 </html>
-
