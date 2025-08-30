@@ -82,19 +82,12 @@
 <!-- Main Chat UI -->
 <div id="chatUI" class="w-full flex flex-col h-screen bg-[#1b1b1b] hidden">
     <div class="px-4 pt-4 flex flex-col flex-1 min-h-0">
-        <div class="flex flex-wrap items-center justify-between gap-y-3 gap-x-4 mb-4">
-            <h1 class="text-2xl sm:text-3xl font-bold text-white order-1">Public Chat</h1>
+        <div class="flex flex-wrap items-center justify-between gap-x-4 mb-4">
+            <h1 class="text-2xl sm:text-3xl font-bold text-white flex-shrink-0">Public Chat</h1>
 
-            <div class="flex items-center gap-x-4 order-3 sm:order-2 w-full sm:w-auto">
-                <div id="user-info" class="flex items-center space-x-2 bg-[#222] rounded-lg p-2 hidden min-w-0 flex-1">
-                    <span class="text-gray-300 text-sm flex-shrink-0">Your ID:</span>
-                    <span id="user-id" class="font-mono text-cyan-400 text-sm truncate"></span>
-                </div>
-            </div>
-
-            <div class="flex items-center gap-x-4 order-2 sm:order-3">
+            <div class="flex items-center gap-x-3 sm:gap-x-4 sm:order-3">
                 <div class="relative">
-                    <div id="online-header" class="bg-[#222] rounded-lg p-2 flex justify-between items-center cursor-pointer">
+                    <div id="online-header" class="bg-[#222] rounded-lg p-1 flex justify-between items-center cursor-pointer">
                         <div class="flex items-center gap-2">
                             <span class="text-gray-300 text-sm">Online</span>
                             <svg class="w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
@@ -106,7 +99,7 @@
 
                 <div class="w-px h-6 bg-gray-700 hidden sm:block"></div>
 
-                <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2 sm:gap-4">
                     <div id="status-indicator" class="w-4 h-4 rounded-full bg-yellow-500 animate-pulse flex-shrink-0"></div>
                     <button id="walletBtn" class="text-gray-400 hover:text-white transition-colors" title="Connect Wallet">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
@@ -119,8 +112,12 @@
                     </button>
                 </div>
             </div>
-        </div>
 
+            <div id="user-info" class="hidden items-center space-x-2 bg-[#222] rounded-lg p-1 min-w-0 w-full sm:w-auto sm:order-2 mt-1">
+                <span class="text-gray-300 text-xs flex-shrink-0">Your ID:</span>
+                <span id="user-id" class="font-mono text-cyan-400 text-xs truncate"></span>
+            </div>
+        </div>
         <div class="flex-1 mb-4 overflow-y-auto px-4 rounded-lg flex flex-col" id="messagesContainer"></div>
         
         <div id="replying-to-container" class="p-3 border-t border-gray-700 hidden">
@@ -344,7 +341,7 @@
     const MAX_MESSAGES = 200;
     const ONLINE_TIMEOUT = 20 * 1000;
     const IMAGE_MAX_WIDTH = 500;
-    const PIECE_SIZE = 64 * 1024; // 64 KB for reliability
+    const PIECE_SIZE =  64 * 1024; // 64 KB for reliability
     const TYPING_INDICATOR_TIMEOUT = 3000; // 3 seconds
 
     // --- STATE VARIABLES ---
@@ -1309,20 +1306,43 @@
     async function assembleFile(fileId) {
         const transfer = incomingFiles.get(fileId);
         if (!transfer) return;
-        
+
         const blob = new Blob(transfer.pieces, { type: transfer.metadata.fileType || 'application/octet-stream' });
+        if (!blob) {
+            updateFileUI(fileId, 'Assembly Error');
+            return;
+        }
 
-        if (blob) {
-            // Store blob for the next step (saving)
+        // Check if the received file is a video from a "video_announce" message
+        if (transfer.metadata.fileType && transfer.metadata.fileType.startsWith('video/')) {
+            // 1. Immediately become a seeder
+            const fileBuffer = await blob.arrayBuffer();
+            const fileData = { buffer: fileBuffer, name: transfer.metadata.fileName, size: transfer.metadata.fileSize, type: transfer.metadata.fileType };
+            localFiles.set(fileId, { fileData, metadata: transfer.metadata });
+            
+            // 2. Update UI to show video player
+            const container = document.getElementById(`video-container-${fileId}`);
+            if (container) {
+                 const url = URL.createObjectURL(blob);
+                 container.innerHTML = `
+                    <div class="relative">
+                        <video controls autoplay class="max-w-xs rounded-md" src="${url}"></video>
+                        <div class="absolute top-2 left-2 bg-black bg-opacity-60 text-white text-xs rounded-md px-2 py-1 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                            </svg>
+                            <span>Seeding</span>
+                        </div>
+                    </div>`;
+            }
+        } else {
+            // For generic files, keep the "Save File" workflow
             transfer.blob = blob;
-
             const button = document.querySelector(`[data-file-id="${fileId}"]`);
             if (button) {
                 button.textContent = 'Save File';
-                button.dataset.action = 'save'; // Set the action for the click handler
+                button.dataset.action = 'save';
             }
-        } else {
-            updateFileUI(fileId, 'Assembly Error');
         }
     }
 
@@ -2193,6 +2213,12 @@
 </script>
 </body>
 </html>
+
+
+
+
+
+
 
 
 
