@@ -75,6 +75,12 @@
     .stream-container:hover .fullscreen-btn { opacity: 1; }
     .fullscreen-btn { position: absolute; top: 8px; right: 8px; background-color: rgba(0,0,0,0.5); border-radius: 50%; padding: 4px; color: white; opacity: 0; transition: opacity 0.2s; border: none; cursor: pointer; }
     .message-entry-wide { max-width: 90%; margin-bottom: 0.75rem; }
+
+    @media (max-width: 640px) {
+        .message-entry {
+            max-width: 90%;
+        }
+    }
 </style>
 </head>
 <body class="min-h-screen">
@@ -337,17 +343,19 @@
     const AUDIO_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app6';
     const REACTION_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app7';
     const TYPING_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app8';
-    const FILE_META_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app9'; // NEW
+    const FILE_META_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app9';
     const MAX_MESSAGES = 500;
     const ONLINE_TIMEOUT = 15 * 1000;
     const IMAGE_MAX_WIDTH = 640;
-    const PIECE_SIZE =  128 * 1024; // 64 KB for reliability
-    const TYPING_INDICATOR_TIMEOUT = 1000; // 1 seconds
+    const PIECE_SIZE =  64 * 1024;
+    const TYPING_INDICATOR_TIMEOUT = 1000;
+    const MAX_CONCURRENT_REQUESTS = 8;
+    const PIECE_REQUEST_TIMEOUT = 7000;
 
     // --- STATE VARIABLES ---
     let streamr;
     let fileWorker;
-    let streamerWorker; // NEW
+    let streamerWorker;
     let myPublisherId = '';
     let myNickname = '';
     let myRealAddress = '';
@@ -693,14 +701,14 @@
             const downloadButton = `<button class="file-button" data-action="start-download" data-file-id="${fileId}">Download</button>`;
 
             const receiverInteractionHTML = `
-                <div id="file-interaction-${fileId}" class="flex items-center gap-2">
+                <div id="file-interaction-${fileId}" class="flex flex-col items-start gap-y-1 mt-2">
                     ${isVideo ? playButton : downloadButton}
-                     <span class="seeder-count text-xs text-gray-500" data-file-id="${fileId}"></span>
+                    <span class="seeder-count text-xs text-gray-500" data-file-id="${fileId}"></span>
                 </div>
             `;
 
             contentHTML = `
-                <div class="file-container" id="video-container-${fileId}">
+                <div class="file-container flex flex-col items-start gap-y-2">
                     <div>
                         <div class="font-semibold">${fileName}</div>
                         <div class="text-xs text-gray-400">${(fileSize / 1024 / 1024).toFixed(2)} MB</div>
@@ -712,6 +720,8 @@
                 incomingFiles.set(fileId, {
                     metadata: message.metadata,
                     pieces: new Array(message.metadata.pieceHashes.length).fill(null),
+                    pieceStatus: new Array(message.metadata.pieceHashes.length).fill('pending'),
+                    requestsInFlight: new Map(),
                     receivedCount: 0
                 });
                 requestFileSources(fileId);
@@ -1037,11 +1047,14 @@
 
                 const { fileId, pieceIndex, data } = message;
                 const transfer = incomingFiles.get(fileId);
-                if (!transfer || transfer.pieces[pieceIndex]) return;
-
+                if (!transfer || transfer.pieceStatus[pieceIndex] !== 'requested') return;
+                
                 const receivedHash = await sha1FromBase64(data);
                 if (receivedHash !== transfer.metadata.pieceHashes[pieceIndex]) {
-                    requestPiece(fileId, pieceIndex);
+                    transfer.pieceStatus[pieceIndex] = 'pending'; // Mark for retry
+                    clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
+                    transfer.requestsInFlight.delete(pieceIndex);
+                    manageDownload(fileId);
                     return;
                 }
 
@@ -1051,8 +1064,11 @@
                 for (let i = 0; i < len; i++) {
                     bytes[i] = binaryString.charCodeAt(i);
                 }
+                
+                clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
+                transfer.requestsInFlight.delete(pieceIndex);
                 transfer.pieces[pieceIndex] = bytes;
-
+                transfer.pieceStatus[pieceIndex] = 'done';
                 transfer.receivedCount++;
 
                 const progress = Math.round((transfer.receivedCount / transfer.metadata.pieceHashes.length) * 100);
@@ -1068,10 +1084,7 @@
                 if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
                     assembleFile(fileId);
                 } else {
-                    const nextPieceIndex = transfer.pieces.findIndex(p => p === null);
-                    if (nextPieceIndex !== -1) {
-                        requestPiece(fileId, nextPieceIndex);
-                    }
+                    manageDownload(fileId);
                 }
             }
         } catch (error) {
@@ -1380,6 +1393,26 @@
         }
     }
 
+    function manageDownload(fileId) {
+        const transfer = incomingFiles.get(fileId);
+        if (!transfer) return;
+        
+        const seeders = Array.from(fileSeeders.get(fileId) || []);
+        if (seeders.length === 0) return;
+
+        let seederIndex = 0;
+
+        while (transfer.requestsInFlight.size < MAX_CONCURRENT_REQUESTS) {
+            const nextPieceIndex = transfer.pieceStatus.findIndex(s => s === 'pending');
+            if (nextPieceIndex === -1) break; // All pieces are either requested or done
+
+            const seederId = seeders[seederIndex % seeders.length];
+            requestPiece(fileId, nextPieceIndex, seederId);
+            seederIndex++;
+        }
+    }
+
+
     function startDownload(fileId) {
         const transfer = incomingFiles.get(fileId);
         if (!transfer) {
@@ -1389,34 +1422,32 @@
 
         const seeders = fileSeeders.get(fileId);
         if (!seeders || seeders.size === 0) {
-            console.error(`[Receiver] No seeders found for file ${fileId}, cannot start download.`);
             const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
             if (interactionContainer) {
-                interactionContainer.innerHTML = `<span class="text-xs text-yellow-500">No seeders online.</span>`;
+                interactionContainer.innerHTML = `<span class="text-xs text-yellow-500">No seeders online. Retrying...</span>`;
+                setTimeout(() => requestFileSources(fileId), 5000);
             }
             return;
         }
-
-        const seederId = seeders.values().next().value;
-        transfer.currentSeeder = seederId;
         
         const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
         if (interactionContainer) {
             interactionContainer.innerHTML = `
                 <div class="flex items-center gap-2">
-                    <span class="progress-text text-xs text-gray-400">Requesting...</span>
+                    <span class="progress-text text-xs text-gray-400">Starting... 0%</span>
                     <button class="cancel-download-btn text-gray-400 hover:text-white" title="Cancel Download" data-action="cancel-download" data-file-id="${fileId}">
                         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>
                     </button>
                 </div>
             `;
         }
-
-        requestPiece(fileId, 0);
+        manageDownload(fileId);
     }
     
     function cancelDownload(fileId) {
-        if (incomingFiles.has(fileId)) {
+        const transfer = incomingFiles.get(fileId);
+        if (transfer) {
+            transfer.requestsInFlight.forEach(({ timeoutId }) => clearTimeout(timeoutId));
             incomingFiles.delete(fileId);
             
             const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
@@ -1424,13 +1455,7 @@
             const isVideo = messageDiv.querySelector('[id^="video-container-"]') !== null;
 
             if (interactionContainer) {
-                const playButton = `
-                    <button class="file-button flex items-center justify-center gap-2" data-action="start-download" data-file-id="${fileId}">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
-                        </svg>
-                        <span>Play</span>
-                    </button>`;
+                const playButton = `<button class="file-button" data-action="start-download" data-file-id="${fileId}">Play</button>`;
                 const downloadButton = `<button class="file-button" data-action="start-download" data-file-id="${fileId}">Download</button>`;
                 interactionContainer.innerHTML = `
                     ${isVideo ? playButton : downloadButton}
@@ -1440,21 +1465,24 @@
         }
     }
 
-    async function requestPiece(fileId, pieceIndex) {
+    async function requestPiece(fileId, pieceIndex, seederId) {
         if (!streamr) return;
-        
         const transfer = incomingFiles.get(fileId);
+        if (!transfer || transfer.pieceStatus[pieceIndex] !== 'pending') return;
 
-        if (!transfer) {
-            return;
-        }
+        transfer.pieceStatus[pieceIndex] = 'requested';
         
-        const seederId = transfer.currentSeeder;
-        if (!seederId) {
-            console.error(`[Receiver] No seeder assigned for file ${fileId}. Cannot request piece.`);
-            return;
-        }
-        
+        const timeoutId = setTimeout(() => {
+            if (transfer.pieceStatus[pieceIndex] === 'requested') {
+                console.warn(`Timeout for piece ${pieceIndex} from ${seederId}`);
+                transfer.pieceStatus[pieceIndex] = 'pending';
+                transfer.requestsInFlight.delete(pieceIndex);
+                manageDownload(fileId);
+            }
+        }, PIECE_REQUEST_TIMEOUT);
+
+        transfer.requestsInFlight.set(pieceIndex, { seederId, timeoutId });
+
         try {
             await streamr.publish(FILE_STREAM_ID, { 
                 type: 'piece_request', 
@@ -1464,6 +1492,10 @@
             });
         } catch (error) {
             console.error(`[Receiver] Failed to request piece ${pieceIndex}:`, error);
+            transfer.pieceStatus[pieceIndex] = 'pending';
+            clearTimeout(timeoutId);
+            transfer.requestsInFlight.delete(pieceIndex);
+            manageDownload(fileId);
         }
     }
 
