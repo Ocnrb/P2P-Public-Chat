@@ -55,7 +55,7 @@
     .message-actions { position: absolute; bottom: -12px; left: -12px; display: none; gap: 4px; background-color: #374151; border-radius: 12px; padding: 2px 4px; z-index: 5; }
     .message-bubble:hover .message-actions { display: flex; }
     .reply-button, .react-button { cursor: pointer; font-size: 16px; }
-    .reaction-picker { position: absolute; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; display: none; flex-wrap: wrap; gap: 4px; max-width: 200px; }
+    .reaction-picker { position: fixed; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; display: none; flex-wrap: wrap; gap: 4px; max-width: 200px; }
     .reaction-picker span { cursor: pointer; font-size: 1.2rem; }
     .spinner { border: 2px solid #f3f3f3; border-top: 2px solid #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; display: inline-block; margin-right: 8px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -347,10 +347,10 @@
     const MAX_MESSAGES = 500;
     const ONLINE_TIMEOUT = 15 * 1000;
     const IMAGE_MAX_WIDTH = 640;
-    const PIECE_SIZE =  64 * 1024;
+    const PIECE_SIZE =  128 * 1024;
     const TYPING_INDICATOR_TIMEOUT = 1000;
-    const MAX_CONCURRENT_REQUESTS = 8;
-    const PIECE_REQUEST_TIMEOUT = 7000;
+    const MAX_CONCURRENT_REQUESTS = 4;
+    const PIECE_REQUEST_TIMEOUT = 10000;
 
     // --- STATE VARIABLES ---
     let streamr;
@@ -722,7 +722,8 @@
                     pieces: new Array(message.metadata.pieceHashes.length).fill(null),
                     pieceStatus: new Array(message.metadata.pieceHashes.length).fill('pending'),
                     requestsInFlight: new Map(),
-                    receivedCount: 0
+                    receivedCount: 0,
+                    isAssembled: false
                 });
                 requestFileSources(fileId);
             }
@@ -1081,7 +1082,7 @@
                     progressElement.textContent = progressText;
                 }
 
-                if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
+                if (transfer.receivedCount >= transfer.metadata.pieceHashes.length) {
                     assembleFile(fileId);
                 } else {
                     manageDownload(fileId);
@@ -1529,7 +1530,8 @@
 
     async function assembleFile(fileId) {
         const transfer = incomingFiles.get(fileId);
-        if (!transfer) return;
+        if (!transfer || transfer.isAssembled) return;
+        transfer.isAssembled = true;
 
         const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
 
@@ -2005,8 +2007,20 @@
                     }
                     picker.style.display = 'flex';
                     const rect = target.getBoundingClientRect();
-                    picker.style.top = `${rect.top - picker.offsetHeight - 5}px`;
-                    picker.style.left = `${rect.left - picker.offsetWidth / 2 + rect.width / 2}px`;
+                    
+                    let leftPos = rect.left - (picker.offsetWidth / 2) + (rect.width / 2);
+                    const topPos = rect.top - picker.offsetHeight - 5;
+
+                    if (leftPos < 8) {
+                        leftPos = 8;
+                    }
+                    if (leftPos + picker.offsetWidth > window.innerWidth - 8) {
+                        leftPos = window.innerWidth - picker.offsetWidth - 8;
+                    }
+
+                    picker.style.top = `${topPos}px`;
+                    picker.style.left = `${leftPos}px`;
+                    
                     picker.dataset.messageId = target.dataset.messageId;
                 } else if (target.classList.contains('reply-button')) {
                     const messageId = target.dataset.messageId;
