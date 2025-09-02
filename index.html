@@ -728,10 +728,12 @@
 
     async function addMessageToUI(message, metadata, isHistorical = false) {
         // --- ROOM FILTER ---
-        // This is the core of the room logic. If the message doesn't belong to the current room, ignore it.
-        if (!isHistorical && message.roomId !== currentRoomId) {
+        if (message.roomId !== currentRoomId) {
             return;
         }
+
+        // Clone the original message payload before any modifications for history purposes
+        const originalMessageForHistory = { ...message };
 
         // --- DECRYPTION LOGIC ---
         if (message.type === 'encrypted') {
@@ -928,7 +930,8 @@
 
         if (!isHistorical) {
             messageCounter++;
-            const standardizedMessage = { ...message, timestamp: metadata.timestamp, userId: metadata.publisherId };
+            // Use the original, unmodified message for the history log
+            const standardizedMessage = { ...originalMessageForHistory, timestamp: metadata.timestamp, userId: metadata.publisherId };
             lastMessages.push(standardizedMessage);
             if (lastMessages.length > MAX_MESSAGES) lastMessages.shift();
             publishLastMessages();
@@ -2753,5 +2756,4 @@
 </script>
 </body>
 </html>
-
 
