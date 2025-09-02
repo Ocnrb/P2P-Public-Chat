@@ -55,7 +55,7 @@
     .message-actions { position: absolute; bottom: -12px; left: -12px; display: none; gap: 4px; background-color: #374151; border-radius: 12px; padding: 2px 4px; z-index: 5; }
     .message-bubble:hover .message-actions { display: flex; }
     .reply-button, .react-button { cursor: pointer; font-size: 16px; }
-    .reaction-picker { position: fixed; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; display: none; flex-wrap: wrap; gap: 4px; max-width: 200px; }
+    .reaction-picker { position: absolute; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; display: none; flex-wrap: wrap; gap: 4px; max-width: 200px; }
     .reaction-picker span { cursor: pointer; font-size: 1.2rem; }
     .spinner { border: 2px solid #f3f3f3; border-top: 2px solid #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; display: inline-block; margin-right: 8px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -89,7 +89,7 @@
 <div id="chatUI" class="w-full flex flex-col bg-[#1b1b1b] hidden">
     <div class="px-4 pt-4 flex flex-col flex-1 min-h-0">
         <div class="flex flex-wrap items-center justify-between gap-x-4 mb-4">
-            <h1 class="text-2xl sm:text-3xl font-bold text-white flex-shrink-0">Public Chat</h1>
+            <h1 id="chatTitle" class="text-2xl sm:text-3xl font-bold text-white flex-shrink-0">Public Chat</h1>
 
             <div class="flex items-center gap-x-3 sm:gap-x-4 sm:order-3">
                 <div class="relative">
@@ -106,6 +106,9 @@
                 <div class="w-px h-6 bg-gray-700 hidden sm:block"></div>
 
                 <div class="flex items-center gap-2 sm:gap-4">
+                    <button id="roomsBtn" class="text-gray-400 hover:text-white transition-colors" title="Chat Rooms">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    </button>
                     <button id="walletBtn" class="text-gray-400 hover:text-white transition-colors" title="Connect Wallet">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
                     </button>
@@ -186,6 +189,39 @@
 
 
 <!-- Other Modals -->
+<div id="roomSelectionModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-sm w-full text-gray-300">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold text-white">Chat Rooms</h2>
+            <button id="closeRoomModalBtn" class="text-gray-400 hover:text-white text-3xl">&times;</button>
+        </div>
+        
+        <div class="mb-6 border-b border-gray-700 pb-6">
+            <p class="mb-2 text-gray-400">Create a new room</p>
+            <div class="flex items-center gap-2 mb-3">
+                <input type="text" id="newRoomInput" class="flex-1 bg-[#2a2a2a] border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-400" placeholder="Enter room name...">
+                <button id="createRoomBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                    Create
+                </button>
+            </div>
+             <div class="flex items-center">
+                <input id="privateRoomCheckbox" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 bg-gray-700">
+                <label for="privateRoomCheckbox" class="ml-2 block text-sm text-gray-300">Private Room</label>
+            </div>
+            <div id="passwordContainer" class="mt-3 hidden">
+                 <input type="password" id="roomPasswordInput" class="w-full bg-[#2a2a2a] border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-400" placeholder="Enter room password...">
+            </div>
+        </div>
+
+        <div>
+            <h3 class="font-bold mb-2 text-gray-400">Join a room</h3>
+            <div id="roomList" class="space-y-2 max-h-48 overflow-y-auto">
+                <!-- Room list will be populated dynamically -->
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="nicknameModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-sm w-full text-gray-300">
         <h2 class="text-2xl font-bold mb-4 text-white">Set Your Nickname</h2>
@@ -347,13 +383,15 @@
     const MAX_MESSAGES = 500;
     const ONLINE_TIMEOUT = 15 * 1000;
     const IMAGE_MAX_WIDTH = 640;
-    const PIECE_SIZE =  128 * 1024;
+    const PIECE_SIZE =  64 * 1024;
     const TYPING_INDICATOR_TIMEOUT = 1000;
-    const MAX_CONCURRENT_REQUESTS = 4;
-    const PIECE_REQUEST_TIMEOUT = 10000;
+    const MAX_CONCURRENT_REQUESTS = 8;
+    const PIECE_REQUEST_TIMEOUT = 7000;
 
     // --- STATE VARIABLES ---
     let streamr;
+    let currentRoomId = 'Lobby'; // Changed default room to 'Lobby'
+    let roomPasswords = new Map(); // New state for private room passwords
     let fileWorker;
     let streamerWorker;
     let myPublisherId = '';
@@ -366,6 +404,7 @@
     let lastMessages = [];
     let messageCounter = 0;
     let activeUsers = new Map();
+    let activeRooms = new Map(); // New state for room discovery
     let loadedImages = new Map();
     let localFiles = new Map();
     let incomingFiles = new Map();
@@ -454,6 +493,79 @@
     const saveNicknameBtn = document.getElementById('saveNicknameBtn');
     const resetNicknameBtn = document.getElementById('resetNicknameBtn');
     const walletBtn = document.getElementById('walletBtn');
+    // New DOM elements for Rooms
+    const chatTitle = document.getElementById('chatTitle');
+    const roomsBtn = document.getElementById('roomsBtn');
+    const roomSelectionModal = document.getElementById('roomSelectionModal');
+    const closeRoomModalBtn = document.getElementById('closeRoomModalBtn');
+    const newRoomInput = document.getElementById('newRoomInput');
+    const createRoomBtn = document.getElementById('createRoomBtn');
+    const roomList = document.getElementById('roomList');
+    const privateRoomCheckbox = document.getElementById('privateRoomCheckbox');
+    const passwordContainer = document.getElementById('passwordContainer');
+    const roomPasswordInput = document.getElementById('roomPasswordInput');
+
+
+    // --- ENCRYPTION HELPER FUNCTIONS ---
+    // TextEncoder instance for converting strings to Uint8Array
+    const textEncoder = new TextEncoder();
+    const textDecoder = new TextDecoder();
+
+    // Derives a cryptographic key from a password and a salt (roomId)
+    async function deriveKeyFromPassword(password, salt) {
+        const keyMaterial = await window.crypto.subtle.importKey(
+            'raw',
+            textEncoder.encode(password),
+            { name: 'PBKDF2' },
+            false,
+            ['deriveKey']
+        );
+        return window.crypto.subtle.deriveKey(
+            {
+                "name": 'PBKDF2',
+                "salt": textEncoder.encode(salt),
+                "iterations": 100000,
+                "hash": 'SHA-256'
+            },
+            keyMaterial,
+            { "name": 'AES-GCM', "length": 256 },
+            true,
+            [ "encrypt", "decrypt" ]
+        );
+    }
+
+    // Encrypts a string message using a derived key
+    async function encryptMessage(text, key) {
+        const iv = window.crypto.getRandomValues(new Uint8Array(12)); // Initialization Vector
+        const encodedText = textEncoder.encode(text);
+        const encryptedContent = await window.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: iv },
+            key,
+            encodedText
+        );
+        // Return IV and encrypted data as base64 strings for easy transport
+        return {
+            iv: arrayBufferToBase64(iv),
+            content: arrayBufferToBase64(encryptedContent)
+        };
+    }
+
+    // Decrypts a base64 encoded string using a derived key and IV
+    async function decryptMessage(encryptedBase64, key, ivBase64) {
+        try {
+            const iv = base64ToArrayBuffer(ivBase64);
+            const encryptedData = base64ToArrayBuffer(encryptedBase64);
+            const decryptedContent = await window.crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: iv },
+                key,
+                encryptedData
+            );
+            return textDecoder.decode(decryptedContent);
+        } catch (e) {
+            console.error("Decryption failed:", e);
+            return null; // Indicates a failure, likely due to a wrong key
+        }
+    }
 
 
     // --- HELPER FUNCTIONS ---
@@ -599,7 +711,7 @@
              if (streamr && currentLiveStreamId && event.data.frame) {
                 const frameData = event.data.frame;
                 // 1. Publish to network for others
-                streamr.publish(VIDEO_STREAM_ID, { streamId: currentLiveStreamId, frame: frameData });
+                streamr.publish(VIDEO_STREAM_ID, { roomId: currentRoomId, streamId: currentLiveStreamId, frame: frameData });
                 
                 // 2. Local loopback to render on our own screen
                 const localStreamInfo = remoteStreams.get(currentLiveStreamId);
@@ -614,7 +726,31 @@
         return worker;
     }
 
-    function addMessageToUI(message, metadata, isHistorical = false) {
+    async function addMessageToUI(message, metadata, isHistorical = false) {
+        // --- ROOM FILTER ---
+        // This is the core of the room logic. If the message doesn't belong to the current room, ignore it.
+        if (!isHistorical && message.roomId !== currentRoomId) {
+            return;
+        }
+
+        // --- DECRYPTION LOGIC ---
+        if (message.type === 'encrypted') {
+            const password = roomPasswords.get(message.roomId);
+            if (password) {
+                const key = await deriveKeyFromPassword(password, message.roomId);
+                const decryptedPayloadJSON = await decryptMessage(message.payload, key, message.iv);
+                if (decryptedPayloadJSON) {
+                    // If decryption is successful, replace the encrypted message with the decrypted one
+                    const decryptedPayload = JSON.parse(decryptedPayloadJSON);
+                    message = { ...message, ...decryptedPayload }; // Merge decrypted content
+                } else {
+                    message.type = 'decryption_failed';
+                }
+            } else {
+                message.type = 'decryption_failed'; // No password available
+            }
+        }
+
         if (message.tempId) {
             const tempElement = document.getElementById(message.tempId);
             if (tempElement) {
@@ -670,8 +806,10 @@
                 </div>
             `;
         }
-
-        if (message.type === 'image') {
+        
+        if (message.type === 'decryption_failed') {
+            contentHTML = `<div class="text-xs italic text-gray-500">🔒 Encrypted message. Incorrect password.</div>`;
+        } else if (message.type === 'image') {
              contentHTML = `<div class="text-xs italic text-gray-500" data-image-id="${message.imageId}">Loading image...</div>`;
              if (isHistorical) {
                  requestData('image', message.imageId);
@@ -722,8 +860,7 @@
                     pieces: new Array(message.metadata.pieceHashes.length).fill(null),
                     pieceStatus: new Array(message.metadata.pieceHashes.length).fill('pending'),
                     requestsInFlight: new Map(),
-                    receivedCount: 0,
-                    isAssembled: false
+                    receivedCount: 0
                 });
                 requestFileSources(fileId);
             }
@@ -887,6 +1024,54 @@
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
+    function updateRoomListUI() {
+        const now = Date.now();
+        const ROOM_TIMEOUT = 30 * 1000; // 30 seconds
+
+        // Clean up inactive rooms and users within rooms
+        for (const [roomId, data] of activeRooms.entries()) {
+            if (now - data.lastSeen > ROOM_TIMEOUT && roomId !== 'Lobby') { // Don't remove Lobby
+                activeRooms.delete(roomId);
+                continue;
+            }
+            for (const [userId, lastSeen] of data.users.entries()) {
+                 if (now - lastSeen > ROOM_TIMEOUT) {
+                    data.users.delete(userId);
+                }
+            }
+        }
+
+        roomList.innerHTML = ''; // Clear the list
+
+        // Ensure 'Lobby' room is always present in the active rooms map
+        if (!activeRooms.has('Lobby')) {
+            activeRooms.set('Lobby', { users: new Map(), lastSeen: now, isPrivate: false });
+        }
+
+        const sortedRooms = [...activeRooms.keys()].sort((a, b) => {
+            if (a === 'Lobby') return -1; // Always sort Lobby to the top
+            if (b === 'Lobby') return 1;
+            return a.localeCompare(b);
+        });
+
+        sortedRooms.forEach(roomId => {
+            const roomData = activeRooms.get(roomId);
+            const userCount = roomData.users.size;
+            const lockIcon = roomData.isPrivate ? '🔒' : '';
+            
+            const roomItem = document.createElement('div');
+            roomItem.className = 'bg-[#2a2a2a] p-3 rounded-lg flex justify-between items-center';
+            roomItem.innerHTML = `
+                <span class="font-semibold truncate pr-2">${roomId} ${lockIcon}</span>
+                <div class="flex items-center gap-x-3 flex-shrink-0">
+                    <span class="text-xs text-gray-400">${userCount} user(s)</span>
+                    <button class="join-room-btn bg-gray-600 hover:bg-gray-700 text-sm py-1 px-3 rounded-md" data-room-id="${roomId}" data-is-private="${roomData.isPrivate}">Join</button>
+                </div>
+            `;
+            roomList.appendChild(roomItem);
+        });
+    }
+
     function updateUIVerification(sessionId) {
         const messagesToUpdate = document.querySelectorAll(`.message-entry[data-session-id="${sessionId}"]`);
         const isVerified = verifiedRealAddresses.has(sessionId);
@@ -912,6 +1097,33 @@
 
 
     // --- STREAMR FUNCTIONS ---
+    function switchRoom(newRoomId) {
+        if (newRoomId === currentRoomId) return;
+
+        console.log(`Switching from room '${currentRoomId}' to '${newRoomId}'...`);
+        
+        // 1. Clear UI and reset local state for the new room
+        messagesContainer.innerHTML = '';
+        lastMessages = [];
+        activeUsers.clear();
+        messageCounter = 0;
+        messageReactions.clear();
+        typingUsers.clear();
+        updateUserList();
+
+        // 2. Update current room ID and UI title
+        currentRoomId = newRoomId;
+        const roomData = activeRooms.get(newRoomId);
+        const lockIcon = roomData && roomData.isPrivate ? ' 🔒' : '';
+        chatTitle.textContent = newRoomId + lockIcon;
+
+
+        // 3. Announce presence in the new room
+        publishPresence();
+
+        console.log(`Successfully switched to room '${newRoomId}'.`);
+    }
+
     async function publishPresence() {
         if (!streamr) return;
         try {
@@ -919,7 +1131,9 @@
                 type: 'presence', 
                 lastActive: Date.now(), 
                 nickname: myNickname,
-                realAddress: myRealAddress
+                realAddress: myRealAddress,
+                roomId: currentRoomId, // Announce which room the user is in
+                isPrivate: roomPasswords.has(currentRoomId) // Announce if the room is private
             };
             if (currentLiveStreamId) {
                 payload.isStreaming = true;
@@ -942,6 +1156,7 @@
             }
             const verifiedUsers = Array.from(verifiedRealAddresses.entries());
             await streamr.publish(METRICS_STREAM_ID, {
+                roomId: currentRoomId,
                 lastMessages: lastMessages,
                 Counter: messageCounter,
                 Reactions: recentReactions,
@@ -952,40 +1167,57 @@
             console.error("Failed to publish last messages", err);
         }
     }
-    async function requestData(dataType, dataId) { if (!streamr) return; try { await streamr.publish(METRICS_STREAM_ID, { type: `${dataType}_request`, [`${dataType}Id`]: dataId }); } catch (err) { console.error(`Failed to request ${dataType} data`, err); } }
+    async function requestData(dataType, dataId) { if (!streamr) return; try { await streamr.publish(METRICS_STREAM_ID, { roomId: currentRoomId, type: `${dataType}_request`, [`${dataType}Id`]: dataId }); } catch (err) { console.error(`Failed to request ${dataType} data`, err); } }
     
     async function handleDataRequest(message) {
-        if (!streamr) return;
+        if (!streamr || message.roomId !== currentRoomId) return;
         const dataType = message.type.split('_')[0];
         const dataId = message[`${dataType}Id`];
         if (dataType === 'image' && loadedImages.has(dataId)) {
             const data = loadedImages.get(dataId);
-            try { await streamr.publish(IMAGE_STREAM_ID, { id: dataId, data: data }); }
+            try { await streamr.publish(IMAGE_STREAM_ID, { roomId: currentRoomId, id: dataId, data: data }); }
             catch (err) { console.error(`Failed to respond to image request`, err); }
         }
     }
 
     async function processMetricsMessage(message, metadata) {
+        // --- Room Discovery & Global Presence ---
+        if (message.type === 'presence' && message.roomId) {
+            if (!activeRooms.has(message.roomId)) {
+                activeRooms.set(message.roomId, { users: new Map(), lastSeen: Date.now(), isPrivate: message.isPrivate || false });
+            }
+            const roomData = activeRooms.get(message.roomId);
+            roomData.users.set(metadata.publisherId, Date.now());
+            roomData.lastSeen = Date.now();
+            if (message.isPrivate) {
+                roomData.isPrivate = true;
+            }
+        }
+
+        // --- Current Room Logic ---
         if (message.type === 'presence') {
-            if (message.realAddress) {
-                userRealAddresses.set(metadata.publisherId, message.realAddress);
-            }
-            if(message.nickname) {
-                const addressKey = message.realAddress || metadata.publisherId;
-                userNicknames.set(addressKey, message.nickname);
-            }
-            activeUsers.set(metadata.publisherId, { lastActive: Date.now() });
-            updateUserList();
+             if (message.roomId === currentRoomId) {
+                if (message.realAddress) {
+                    userRealAddresses.set(metadata.publisherId, message.realAddress);
+                }
+                if(message.nickname) {
+                    const addressKey = message.realAddress || metadata.publisherId;
+                    userNicknames.set(addressKey, message.nickname);
+                }
+                activeUsers.set(metadata.publisherId, { lastActive: Date.now() });
+                updateUserList();
             
-            if (message.isStreaming && message.streamId && metadata.publisherId !== myPublisherId) {
-                const streamEl = document.getElementById(`stream-${message.streamId}`);
-                if (!streamEl) {
-                    const fakeStartStreamMessage = { type: 'start_stream', streamId: message.streamId, id: `stream-start-${message.streamId}` };
-                    const fakeMetadata = { publisherId: metadata.publisherId, timestamp: Date.now() };
-                    addMessageToUI(fakeStartStreamMessage, fakeMetadata, true);
+                if (message.isStreaming && message.streamId && metadata.publisherId !== myPublisherId) {
+                    const streamEl = document.getElementById(`stream-${message.streamId}`);
+                    if (!streamEl) {
+                        const fakeStartStreamMessage = { type: 'start_stream', streamId: message.streamId, id: `stream-start-${message.streamId}` };
+                        const fakeMetadata = { publisherId: metadata.publisherId, timestamp: Date.now() };
+                        addMessageToUI({ ...fakeStartStreamMessage, roomId: message.roomId }, fakeMetadata, true);
+                    }
                 }
             }
         } else if (message.type === 'identity_proof') {
+            if (message.roomId !== currentRoomId) return;
             try {
                 const recoveredAddress = ethers.utils.verifyMessage(message.proofMsg, message.signature);
                 if (recoveredAddress.toLowerCase() === message.realAddress.toLowerCase()) {
@@ -997,6 +1229,7 @@
                 console.error("Failed to verify identity proof:", e);
             }
         } else if (message.type === 'last_messages') {
+            if (message.roomId !== currentRoomId) return;
             const isHistoryValid = message.Counter > 0 ? (message.lastMessages && message.lastMessages.length > 0) : true;
             if (isHistoryValid && message.Counter > messageCounter && metadata.publisherId !== myPublisherId) {
                 
@@ -1017,8 +1250,8 @@
                 }
 
                 const sortedMessages = message.lastMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-                sortedMessages.forEach(msg => {
-                    addMessageToUI(msg, { publisherId: msg.userId, timestamp: msg.timestamp }, true)
+                sortedMessages.forEach(async msg => {
+                    await addMessageToUI(msg, { publisherId: msg.userId, timestamp: msg.timestamp }, true)
                 });
                 lastMessages = sortedMessages;
                 messageCounter = message.Counter;
@@ -1030,6 +1263,7 @@
     }
 
     function handleImageMessage(message) {
+        if (message.roomId !== currentRoomId) return;
         loadedImages.set(message.id, message.data);
         const imgContainer = document.querySelector(`[data-image-id="${message.id}"]`);
         if (imgContainer) {
@@ -1038,6 +1272,7 @@
     }
 
     async function handleFileStreamMessage(message, metadata) {
+        if (message.roomId !== currentRoomId) return;
         try {
             if (message.type === 'piece_request') {
                 if (localFiles.has(message.fileId) && message.targetSeederId === myPublisherId) {
@@ -1082,7 +1317,7 @@
                     progressElement.textContent = progressText;
                 }
 
-                if (transfer.receivedCount >= transfer.metadata.pieceHashes.length) {
+                if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
                     assembleFile(fileId);
                 } else {
                     manageDownload(fileId);
@@ -1095,6 +1330,7 @@
     
     // NEW: Handles messages on the file metadata stream
     async function handleFileMetaMessage(message, metadata) {
+        if (message.roomId !== currentRoomId) return;
         if (message.type === 'source_request') {
             if (localFiles.has(message.fileId) && metadata.publisherId !== myPublisherId) {
                 await announceFileSource(message.fileId);
@@ -1116,6 +1352,7 @@
         if (!streamr) return;
         try {
             await streamr.publish(FILE_META_STREAM_ID, {
+                roomId: currentRoomId,
                 type: 'source_announce',
                 fileId: fileId,
             });
@@ -1130,6 +1367,7 @@
         fileSeeders.set(fileId, new Set());
         try {
             await streamr.publish(FILE_META_STREAM_ID, {
+                roomId: currentRoomId,
                 type: 'source_request',
                 fileId: fileId,
             });
@@ -1140,6 +1378,7 @@
 
     // MODIFIED: Offloads frame decoding to a Web Worker
     function handleVideoStreamMessage(message) {
+        if (message.roomId !== currentRoomId) return;
         const streamInfo = remoteStreams.get(message.streamId);
         if (streamInfo && streamInfo.videoWorker) {
             streamInfo.videoWorker.postMessage({ frame: message.frame });
@@ -1148,6 +1387,7 @@
 
     // MODIFIED: Safely initializes audio context
     function handleAudioStreamMessage(message) {
+        if (message.roomId !== currentRoomId) return;
         if (message.streamId === currentLiveStreamId) return; 
 
         let streamInfo = remoteStreams.get(message.streamId);
@@ -1176,6 +1416,7 @@
     }
 
     function handleReactionMessage(message) {
+        if (message.roomId !== currentRoomId) return;
         const { messageId, emoji, userId } = message;
         if (!messageReactions.has(messageId)) {
             messageReactions.set(messageId, {});
@@ -1194,6 +1435,7 @@
     }
 
     function handleTypingMessage(message, metadata) {
+        if (message.roomId !== currentRoomId) return;
         if (metadata.publisherId !== myPublisherId) {
             typingUsers.set(metadata.publisherId, Date.now());
             updateTypingIndicatorUI();
@@ -1227,6 +1469,7 @@
             chatUI.classList.remove('hidden');
             userIdDisplay.textContent = myNickname || myRealAddress || myPublisherId;
             userInfo.classList.remove('hidden');
+            chatTitle.textContent = currentRoomId; // Set initial room title
 
             if (myRealAddress) {
                 walletBtn.title = 'Disconnect Wallet';
@@ -1234,6 +1477,7 @@
                 walletBtn.title = 'Connect Wallet';
             }
 
+            // Subscribe to the fixed, global streams
             await streamr.subscribe(CHAT_STREAM_ID, addMessageToUI);
             await streamr.subscribe(IMAGE_STREAM_ID, handleImageMessage);
             await streamr.subscribe(FILE_STREAM_ID, handleFileStreamMessage);
@@ -1251,6 +1495,7 @@
                 publishLastMessages();
                 updateUserList();
                 updateTypingIndicatorUI();
+                updateRoomListUI(); // Update room list periodically
             }, 3000);
         } catch (error) {
             throw new Error(`Could not initialize chat. ${error.message}`);
@@ -1306,6 +1551,7 @@
             const proofMsg = `Verifying ownership: My address ${myRealAddress} will be represented by session ${myPublisherId}`;
             const proofSignature = await signer.signMessage(proofMsg);
             await streamr.publish(METRICS_STREAM_ID, {
+                roomId: currentRoomId,
                 type: 'identity_proof',
                 realAddress: myRealAddress,
                 sessionId: myPublisherId,
@@ -1338,7 +1584,7 @@
         const text = messageInput.value.trim();
         if (!text || !streamr) return;
 
-        const messagePayload = {
+        let messagePayload = {
             type: 'text',
             content: text,
             id: crypto.randomUUID(),
@@ -1362,7 +1608,22 @@
         }
 
         try {
-            await streamr.publish(CHAT_STREAM_ID, messagePayload);
+            const password = roomPasswords.get(currentRoomId);
+            if (password) {
+                const key = await deriveKeyFromPassword(password, currentRoomId);
+                const encrypted = await encryptMessage(JSON.stringify(messagePayload), key);
+                
+                // Publish an encrypted wrapper object
+                await streamr.publish(CHAT_STREAM_ID, {
+                    roomId: currentRoomId,
+                    type: 'encrypted',
+                    iv: encrypted.iv,
+                    payload: encrypted.content
+                });
+            } else {
+                 await streamr.publish(CHAT_STREAM_ID, { ...messagePayload, roomId: currentRoomId });
+            }
+
             messageInput.value = '';
             messageInput.focus();
             if (isTypingTimeout) {
@@ -1379,7 +1640,7 @@
     async function sendReaction(messageId, emoji) {
         if (!streamr) return;
         try {
-            await streamr.publish(REACTION_STREAM_ID, { messageId, emoji, userId: myPublisherId });
+            await streamr.publish(REACTION_STREAM_ID, { roomId: currentRoomId, messageId, emoji, userId: myPublisherId });
         } catch (error) {
             console.error("Failed to send reaction:", error);
         }
@@ -1388,7 +1649,7 @@
     async function sendTypingSignal() {
         if (!streamr) return;
         try {
-            await streamr.publish(TYPING_STREAM_ID, { type: 'is_typing' });
+            await streamr.publish(TYPING_STREAM_ID, { roomId: currentRoomId, type: 'is_typing' });
         } catch(err) {
             console.error("Could not send typing signal", err);
         }
@@ -1486,6 +1747,7 @@
 
         try {
             await streamr.publish(FILE_STREAM_ID, { 
+                roomId: currentRoomId,
                 type: 'piece_request', 
                 fileId, 
                 pieceIndex,
@@ -1510,6 +1772,16 @@
         return window.btoa(binary);
     }
 
+    function base64ToArrayBuffer(base64) {
+        const binary_string = window.atob(base64);
+        const len = binary_string.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binary_string.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
     async function sendPiece(fileId, pieceIndex) {
         if (!streamr) return;
         try {
@@ -1522,7 +1794,7 @@
             
             const data = arrayBufferToBase64(pieceBuffer);
             
-            await streamr.publish(FILE_STREAM_ID, { type: 'file_piece', fileId, pieceIndex, data });
+            await streamr.publish(FILE_STREAM_ID, { roomId: currentRoomId, type: 'file_piece', fileId, pieceIndex, data });
         } catch (error) {
             console.error(`[Sender] Failed to send piece ${pieceIndex}:`, error);
         }
@@ -1530,8 +1802,7 @@
 
     async function assembleFile(fileId) {
         const transfer = incomingFiles.get(fileId);
-        if (!transfer || transfer.isAssembled) return;
-        transfer.isAssembled = true;
+        if (!transfer) return;
 
         const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
 
@@ -1663,6 +1934,7 @@
             
             currentLiveStreamId = crypto.randomUUID();
             await streamr.publish(CHAT_STREAM_ID, { 
+                roomId: currentRoomId,
                 type: 'start_stream', 
                 streamId: currentLiveStreamId, 
                 id: crypto.randomUUID(), 
@@ -1687,7 +1959,7 @@
 
                 audioProcessor.onaudioprocess = (e) => {
                     const audioData = e.inputBuffer.getChannelData(0);
-                    streamr.publish(AUDIO_STREAM_ID, { streamId: currentLiveStreamId, audioData: Array.from(audioData) });
+                    streamr.publish(AUDIO_STREAM_ID, { roomId: currentRoomId, streamId: currentLiveStreamId, audioData: Array.from(audioData) });
                 };
 
                 source.connect(audioProcessor);
@@ -1730,6 +2002,7 @@
         videoPreviewModal.classList.add('hidden');
         if (currentLiveStreamId && streamr) {
             await streamr.publish(CHAT_STREAM_ID, { 
+                roomId: currentRoomId,
                 type: 'stop_stream', 
                 streamId: currentLiveStreamId, 
                 id: crypto.randomUUID(), 
@@ -1821,14 +2094,15 @@
                     imageId: dataId, 
                     id: messageId, 
                     nickname: myNickname, 
-                    realAddress: myRealAddress 
+                    realAddress: myRealAddress,
+                    roomId: currentRoomId // Manually add roomId for local display
                 }, { publisherId: myPublisherId, timestamp: Date.now() });
                 
                 resizeImage(file, async (base64Data) => {
                     try {
                         loadedImages.set(dataId, base64Data);
                         if (streamr) {
-                            await streamr.publish(IMAGE_STREAM_ID, { id: dataId, data: base64Data });
+                            await streamr.publish(IMAGE_STREAM_ID, { roomId: currentRoomId, id: dataId, data: base64Data });
                         }
                     } catch (error) {
                         console.error(`Failed to send image:`, error);
@@ -2007,20 +2281,8 @@
                     }
                     picker.style.display = 'flex';
                     const rect = target.getBoundingClientRect();
-                    
-                    let leftPos = rect.left - (picker.offsetWidth / 2) + (rect.width / 2);
-                    const topPos = rect.top - picker.offsetHeight - 5;
-
-                    if (leftPos < 8) {
-                        leftPos = 8;
-                    }
-                    if (leftPos + picker.offsetWidth > window.innerWidth - 8) {
-                        leftPos = window.innerWidth - picker.offsetWidth - 8;
-                    }
-
-                    picker.style.top = `${topPos}px`;
-                    picker.style.left = `${leftPos}px`;
-                    
+                    picker.style.top = `${rect.top - picker.offsetHeight - 5}px`;
+                    picker.style.left = `${rect.left - picker.offsetWidth / 2 + rect.width / 2}px`;
                     picker.dataset.messageId = target.dataset.messageId;
                 } else if (target.classList.contains('reply-button')) {
                     const messageId = target.dataset.messageId;
@@ -2168,6 +2430,75 @@
             }
         });
 
+        // --- Room UI Event Listeners ---
+        roomsBtn.addEventListener('click', () => {
+            roomSelectionModal.classList.remove('hidden');
+        });
+
+        closeRoomModalBtn.addEventListener('click', () => {
+            roomSelectionModal.classList.add('hidden');
+        });
+        
+        roomSelectionModal.addEventListener('click', (e) => {
+             if (e.target === roomSelectionModal) {
+                roomSelectionModal.classList.add('hidden');
+            }
+        });
+
+        privateRoomCheckbox.addEventListener('change', () => {
+            passwordContainer.classList.toggle('hidden', !privateRoomCheckbox.checked);
+        });
+
+        createRoomBtn.addEventListener('click', () => {
+            const newRoomName = newRoomInput.value.trim();
+            if (!newRoomName) return;
+
+            if (privateRoomCheckbox.checked) {
+                const password = roomPasswordInput.value;
+                if (!password) {
+                    showCustomAlert('Password Required', 'Please enter a password for the private room.');
+                    return;
+                }
+                roomPasswords.set(newRoomName, password);
+            }
+            
+            switchRoom(newRoomName);
+            newRoomInput.value = '';
+            roomPasswordInput.value = '';
+            privateRoomCheckbox.checked = false;
+            passwordContainer.classList.add('hidden');
+            roomSelectionModal.classList.add('hidden');
+        });
+        
+        newRoomInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                createRoomBtn.click();
+            }
+        });
+
+        roomList.addEventListener('click', (e) => {
+            const joinBtn = e.target.closest('.join-room-btn');
+            if (joinBtn) {
+                const roomId = joinBtn.dataset.roomId;
+                const isPrivate = joinBtn.dataset.isPrivate === 'true';
+
+                if (isPrivate && !roomPasswords.has(roomId)) {
+                    const password = prompt(`Enter password for room "${roomId}":`);
+                    if (password) {
+                        roomPasswords.set(roomId, password);
+                    } else {
+                        return; // User cancelled prompt
+                    }
+                }
+                
+                if (roomId) {
+                    switchRoom(roomId);
+                    roomSelectionModal.classList.add('hidden');
+                }
+            }
+        });
+
+
         document.addEventListener('click', (e) => {
             for (const streamInfo of remoteStreams.values()) {
                 if (streamInfo.audioContext && streamInfo.audioContext.state === 'suspended') {
@@ -2277,15 +2608,30 @@
                 
                 const messageId = crypto.randomUUID();
                 const messageType = intent === 'video' ? 'video_announce' : 'file_announce';
+                
+                const messagePayload = { 
+                    type: messageType, 
+                    metadata, 
+                    id: messageId,
+                    nickname: myNickname,
+                    realAddress: myRealAddress 
+                };
 
                 try {
-                    await streamr.publish(CHAT_STREAM_ID, { 
-                        type: messageType, 
-                        metadata, 
-                        id: messageId,
-                        nickname: myNickname,
-                        realAddress: myRealAddress 
-                    });
+                     const password = roomPasswords.get(currentRoomId);
+                    if (password) {
+                        const key = await deriveKeyFromPassword(password, currentRoomId);
+                        const encrypted = await encryptMessage(JSON.stringify(messagePayload), key);
+                        await streamr.publish(CHAT_STREAM_ID, {
+                            roomId: currentRoomId,
+                            type: 'encrypted',
+                            iv: encrypted.iv,
+                            payload: encrypted.content
+                        });
+                    } else {
+                        await streamr.publish(CHAT_STREAM_ID, { ...messagePayload, roomId: currentRoomId });
+                    }
+
                 } catch (error) {
                     console.error(`Failed to announce ${metadata.fileType}:`, error);
                     showCustomAlert('Error', `Failed to announce file ${metadata.fileName}.`);
@@ -2407,4 +2753,5 @@
 </script>
 </body>
 </html>
+
 
