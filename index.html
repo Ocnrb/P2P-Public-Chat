@@ -707,11 +707,29 @@
         `;
         const blob = new Blob([workerCode], { type: 'application/javascript' });
         const worker = new Worker(URL.createObjectURL(blob));
-        worker.onmessage = (event) => {
+        worker.onmessage = async (event) => {
              if (streamr && currentLiveStreamId && event.data.frame) {
                 const frameData = event.data.frame;
-                // 1. Publish to network for others
-                streamr.publish(VIDEO_STREAM_ID, { roomId: currentRoomId, streamId: currentLiveStreamId, frame: frameData });
+
+                const password = roomPasswords.get(currentRoomId);
+                if (password) {
+                    try {
+                        const key = await deriveKeyFromPassword(password, currentRoomId);
+                        const encrypted = await encryptMessage(frameData, key);
+                        streamr.publish(VIDEO_STREAM_ID, {
+                            roomId: currentRoomId,
+                            streamId: currentLiveStreamId,
+                            type: 'encrypted_frame',
+                            iv: encrypted.iv,
+                            payload: encrypted.content
+                        });
+                    } catch (e) {
+                        console.error("Failed to encrypt video frame:", e);
+                    }
+                } else {
+                    // 1. Publish to network for others
+                    streamr.publish(VIDEO_STREAM_ID, { roomId: currentRoomId, streamId: currentLiveStreamId, frame: frameData });
+                }
                 
                 // 2. Local loopback to render on our own screen
                 const localStreamInfo = remoteStreams.get(currentLiveStreamId);
@@ -1178,7 +1196,24 @@
         const dataId = message[`${dataType}Id`];
         if (dataType === 'image' && loadedImages.has(dataId)) {
             const data = loadedImages.get(dataId);
-            try { await streamr.publish(IMAGE_STREAM_ID, { roomId: currentRoomId, id: dataId, data: data }); }
+            try {
+                const password = roomPasswords.get(currentRoomId);
+                if (password) {
+                    // Re-encrypt for historical requests in private rooms to maintain privacy
+                    const key = await deriveKeyFromPassword(password, currentRoomId);
+                    const encrypted = await encryptMessage(data, key);
+                    await streamr.publish(IMAGE_STREAM_ID, {
+                        roomId: currentRoomId,
+                        id: dataId,
+                        type: 'encrypted_image',
+                        iv: encrypted.iv,
+                        payload: encrypted.content
+                    });
+                } else {
+                    // Public room, send as is
+                    await streamr.publish(IMAGE_STREAM_ID, { roomId: currentRoomId, id: dataId, data: data, type: 'image' });
+                }
+            }
             catch (err) { console.error(`Failed to respond to image request`, err); }
         }
     }
@@ -1265,12 +1300,37 @@
         }
     }
 
-    function handleImageMessage(message) {
+    async function handleImageMessage(message) {
         if (message.roomId !== currentRoomId) return;
-        loadedImages.set(message.id, message.data);
-        const imgContainer = document.querySelector(`[data-image-id="${message.id}"]`);
-        if (imgContainer) {
-            imgContainer.innerHTML = `<img src="${message.data}" class="max-w-xs rounded-md" />`;
+        
+        let imageData = null;
+
+        if (message.type === 'encrypted_image') {
+            const password = roomPasswords.get(currentRoomId);
+            if(password) {
+                try {
+                    const key = await deriveKeyFromPassword(password, currentRoomId);
+                    const decryptedData = await decryptMessage(message.payload, key, message.iv);
+                    if (decryptedData) {
+                        imageData = decryptedData;
+                    }
+                } catch (e) { console.error("Failed to decrypt image", e); }
+            }
+        } else {
+            imageData = message.data;
+        }
+
+        if (imageData) {
+            loadedImages.set(message.id, imageData);
+            const imgContainer = document.querySelector(`[data-image-id="${message.id}"]`);
+            if (imgContainer) {
+                imgContainer.innerHTML = `<img src="${imageData}" class="max-w-xs rounded-md" />`;
+            }
+        } else {
+             const imgContainer = document.querySelector(`[data-image-id="${message.id}"]`);
+             if (imgContainer) {
+                imgContainer.textContent = '🔒 Failed to decrypt image.';
+             }
         }
     }
 
@@ -1281,6 +1341,65 @@
                 if (localFiles.has(message.fileId) && message.targetSeederId === myPublisherId) {
                     await sendPiece(message.fileId, message.pieceIndex);
                 }
+            } else if (message.type === 'file_piece_encrypted') {
+                if (metadata.publisherId === myPublisherId) return;
+
+                const { fileId, pieceIndex, payload, iv } = message;
+                const transfer = incomingFiles.get(fileId);
+                if (!transfer || transfer.pieceStatus[pieceIndex] !== 'requested') return;
+
+                const password = roomPasswords.get(currentRoomId);
+                if (!password) return; // Cannot decrypt without password
+
+                const key = await deriveKeyFromPassword(password, currentRoomId);
+                const data = await decryptMessage(payload, key, iv);
+
+                if (!data) { // Decryption failed
+                    transfer.pieceStatus[pieceIndex] = 'pending'; // Mark for retry
+                    clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
+                    transfer.requestsInFlight.delete(pieceIndex);
+                    manageDownload(fileId);
+                    return;
+                }
+                
+                const receivedHash = await sha1FromBase64(data);
+                if (receivedHash !== transfer.metadata.pieceHashes[pieceIndex]) {
+                    transfer.pieceStatus[pieceIndex] = 'pending'; // Mark for retry
+                    clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
+                    transfer.requestsInFlight.delete(pieceIndex);
+                    manageDownload(fileId);
+                    return;
+                }
+
+                const binaryString = atob(data);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
+                transfer.requestsInFlight.delete(pieceIndex);
+                transfer.pieces[pieceIndex] = bytes;
+                transfer.pieceStatus[pieceIndex] = 'done';
+                transfer.receivedCount++;
+
+                const progress = Math.round((transfer.receivedCount / transfer.metadata.pieceHashes.length) * 100);
+                const receivedMB = (transfer.receivedCount * PIECE_SIZE / 1024 / 1024).toFixed(2);
+                const totalMB = (transfer.metadata.fileSize / 1024 / 1024).toFixed(2);
+                const progressText = `Receiving... ${progress}% (${receivedMB}MB / ${totalMB}MB)`;
+                
+                const progressElement = document.querySelector(`#file-interaction-${fileId} .progress-text`);
+                if (progressElement) {
+                    progressElement.textContent = progressText;
+                }
+
+                if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
+                    assembleFile(fileId);
+                } else {
+                    manageDownload(fileId);
+                }
+
             } else if (message.type === 'file_piece') {
                 if (metadata.publisherId === myPublisherId) return;
 
@@ -1380,23 +1499,58 @@
     }
 
     // MODIFIED: Offloads frame decoding to a Web Worker
-    function handleVideoStreamMessage(message) {
+    async function handleVideoStreamMessage(message) {
         if (message.roomId !== currentRoomId) return;
         const streamInfo = remoteStreams.get(message.streamId);
-        if (streamInfo && streamInfo.videoWorker) {
+        if (!streamInfo || !streamInfo.videoWorker) return;
+
+        if (message.type === 'encrypted_frame') {
+            const password = roomPasswords.get(currentRoomId);
+            if (password) {
+                try {
+                    const key = await deriveKeyFromPassword(password, currentRoomId);
+                    const decryptedFrame = await decryptMessage(message.payload, key, message.iv);
+                    if (decryptedFrame) {
+                        streamInfo.videoWorker.postMessage({ frame: decryptedFrame });
+                    }
+                } catch (e) {
+                    console.error("Failed to decrypt video frame", e);
+                }
+            }
+        } else {
             streamInfo.videoWorker.postMessage({ frame: message.frame });
         }
     }
 
     // MODIFIED: Safely initializes audio context
-    function handleAudioStreamMessage(message) {
+    async function handleAudioStreamMessage(message) {
         if (message.roomId !== currentRoomId) return;
         if (message.streamId === currentLiveStreamId) return; 
 
         let streamInfo = remoteStreams.get(message.streamId);
-        if (!streamInfo) {
-            return;
+        if (!streamInfo) return;
+
+        let audioDataArray;
+
+        if (message.type === 'encrypted_audio') {
+            const password = roomPasswords.get(currentRoomId);
+            if (password) {
+                try {
+                    const key = await deriveKeyFromPassword(password, currentRoomId);
+                    const decryptedPayload = await decryptMessage(message.payload, key, message.iv);
+                    if (decryptedPayload) {
+                        audioDataArray = JSON.parse(decryptedPayload);
+                    }
+                } catch (e) {
+                    console.error("Failed to decrypt audio data", e);
+                    return;
+                }
+            }
+        } else {
+            audioDataArray = message.audioData;
         }
+
+        if (!audioDataArray) return;
 
         if (!streamInfo.audioContext) {
              streamInfo.audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -1408,7 +1562,7 @@
             audioContext.resume();
         }
         
-        const audioData = new Float32Array(message.audioData);
+        const audioData = new Float32Array(audioDataArray);
         const audioBuffer = audioContext.createBuffer(1, audioData.length, audioContext.sampleRate);
         audioBuffer.copyToChannel(audioData, 0);
 
@@ -1418,9 +1572,29 @@
         source.start();
     }
 
-    function handleReactionMessage(message) {
+    async function handleReactionMessage(message) {
         if (message.roomId !== currentRoomId) return;
-        const { messageId, emoji, userId } = message;
+
+        let reactionData;
+
+        if (message.type === 'encrypted_reaction') {
+            const password = roomPasswords.get(currentRoomId);
+            if (password) {
+                try {
+                    const key = await deriveKeyFromPassword(password, currentRoomId);
+                    const decryptedPayload = await decryptMessage(message.payload, key, message.iv);
+                    if (decryptedPayload) {
+                        reactionData = JSON.parse(decryptedPayload);
+                    }
+                } catch(e) { console.error("Failed to decrypt reaction", e); return; }
+            }
+        } else {
+            reactionData = message;
+        }
+
+        if (!reactionData) return;
+
+        const { messageId, emoji, userId } = reactionData;
         if (!messageReactions.has(messageId)) {
             messageReactions.set(messageId, {});
         }
@@ -1437,9 +1611,30 @@
         updateReactionsUI(messageId);
     }
 
-    function handleTypingMessage(message, metadata) {
+    async function handleTypingMessage(message, metadata) {
         if (message.roomId !== currentRoomId) return;
-        if (metadata.publisherId !== myPublisherId) {
+        if (metadata.publisherId === myPublisherId) return;
+
+        let isTyping = false;
+        if (message.type === 'encrypted_typing') {
+             const password = roomPasswords.get(currentRoomId);
+             if (password) {
+                try {
+                    const key = await deriveKeyFromPassword(password, currentRoomId);
+                    const decryptedPayload = await decryptMessage(message.payload, key, message.iv);
+                    if (decryptedPayload) {
+                        const typingData = JSON.parse(decryptedPayload);
+                        if (typingData.type === 'is_typing') {
+                             isTyping = true;
+                        }
+                    }
+                } catch (e) { console.error("Failed to decrypt typing indicator", e); }
+             }
+        } else if (message.type === 'is_typing') {
+            isTyping = true;
+        }
+        
+        if (isTyping) {
             typingUsers.set(metadata.publisherId, Date.now());
             updateTypingIndicatorUI();
         }
@@ -1643,7 +1838,20 @@
     async function sendReaction(messageId, emoji) {
         if (!streamr) return;
         try {
-            await streamr.publish(REACTION_STREAM_ID, { roomId: currentRoomId, messageId, emoji, userId: myPublisherId });
+            const password = roomPasswords.get(currentRoomId);
+            if (password) {
+                const payload = { messageId, emoji, userId: myPublisherId };
+                const key = await deriveKeyFromPassword(password, currentRoomId);
+                const encrypted = await encryptMessage(JSON.stringify(payload), key);
+                await streamr.publish(REACTION_STREAM_ID, {
+                    roomId: currentRoomId,
+                    type: 'encrypted_reaction',
+                    iv: encrypted.iv,
+                    payload: encrypted.content
+                });
+            } else {
+                await streamr.publish(REACTION_STREAM_ID, { roomId: currentRoomId, messageId, emoji, userId: myPublisherId });
+            }
         } catch (error) {
             console.error("Failed to send reaction:", error);
         }
@@ -1652,7 +1860,20 @@
     async function sendTypingSignal() {
         if (!streamr) return;
         try {
-            await streamr.publish(TYPING_STREAM_ID, { roomId: currentRoomId, type: 'is_typing' });
+            const password = roomPasswords.get(currentRoomId);
+            if (password) {
+                const payload = { type: 'is_typing' };
+                const key = await deriveKeyFromPassword(password, currentRoomId);
+                const encrypted = await encryptMessage(JSON.stringify(payload), key);
+                 await streamr.publish(TYPING_STREAM_ID, {
+                    roomId: currentRoomId,
+                    type: 'encrypted_typing',
+                    iv: encrypted.iv,
+                    payload: encrypted.content
+                });
+            } else {
+                await streamr.publish(TYPING_STREAM_ID, { roomId: currentRoomId, type: 'is_typing' });
+            }
         } catch(err) {
             console.error("Could not send typing signal", err);
         }
@@ -1797,7 +2018,21 @@
             
             const data = arrayBufferToBase64(pieceBuffer);
             
-            await streamr.publish(FILE_STREAM_ID, { roomId: currentRoomId, type: 'file_piece', fileId, pieceIndex, data });
+            const password = roomPasswords.get(currentRoomId);
+            if (password) {
+                const key = await deriveKeyFromPassword(password, currentRoomId);
+                const encrypted = await encryptMessage(data, key);
+                await streamr.publish(FILE_STREAM_ID, {
+                    roomId: currentRoomId,
+                    type: 'file_piece_encrypted',
+                    fileId,
+                    pieceIndex,
+                    iv: encrypted.iv,
+                    payload: encrypted.content
+                });
+            } else {
+                await streamr.publish(FILE_STREAM_ID, { roomId: currentRoomId, type: 'file_piece', fileId, pieceIndex, data });
+            }
         } catch (error) {
             console.error(`[Sender] Failed to send piece ${pieceIndex}:`, error);
         }
@@ -1960,9 +2195,28 @@
                 const source = audioContext.createMediaStreamSource(localMediaStream);
                 audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
-                audioProcessor.onaudioprocess = (e) => {
+                audioProcessor.onaudioprocess = async (e) => {
                     const audioData = e.inputBuffer.getChannelData(0);
-                    streamr.publish(AUDIO_STREAM_ID, { roomId: currentRoomId, streamId: currentLiveStreamId, audioData: Array.from(audioData) });
+                    const audioDataArray = Array.from(audioData);
+                    
+                    const password = roomPasswords.get(currentRoomId);
+                    if (password) {
+                        try {
+                            const key = await deriveKeyFromPassword(password, currentRoomId);
+                            const encrypted = await encryptMessage(JSON.stringify(audioDataArray), key);
+                            streamr.publish(AUDIO_STREAM_ID, {
+                                roomId: currentRoomId,
+                                streamId: currentLiveStreamId,
+                                type: 'encrypted_audio',
+                                iv: encrypted.iv,
+                                payload: encrypted.content
+                            });
+                        } catch(err) {
+                            console.error("Failed to encrypt audio data:", err);
+                        }
+                    } else {
+                        streamr.publish(AUDIO_STREAM_ID, { roomId: currentRoomId, streamId: currentLiveStreamId, audioData: audioDataArray });
+                    }
                 };
 
                 source.connect(audioProcessor);
@@ -2103,9 +2357,23 @@
                 
                 resizeImage(file, async (base64Data) => {
                     try {
-                        loadedImages.set(dataId, base64Data);
-                        if (streamr) {
-                            await streamr.publish(IMAGE_STREAM_ID, { roomId: currentRoomId, id: dataId, data: base64Data });
+                        const password = roomPasswords.get(currentRoomId);
+                        if (password) {
+                            const key = await deriveKeyFromPassword(password, currentRoomId);
+                            const encrypted = await encryptMessage(base64Data, key);
+                            await streamr.publish(IMAGE_STREAM_ID, {
+                                roomId: currentRoomId,
+                                id: dataId,
+                                type: 'encrypted_image',
+                                iv: encrypted.iv,
+                                payload: encrypted.content
+                            });
+                            loadedImages.set(dataId, base64Data); // Keep the unencrypted version for local display
+                        } else {
+                            loadedImages.set(dataId, base64Data);
+                            if (streamr) {
+                                await streamr.publish(IMAGE_STREAM_ID, { roomId: currentRoomId, id: dataId, data: base64Data, type: 'image' });
+                            }
                         }
                     } catch (error) {
                         console.error(`Failed to send image:`, error);
@@ -2756,4 +3024,3 @@
 </script>
 </body>
 </html>
-
