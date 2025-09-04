@@ -32,6 +32,7 @@
     .input-button:hover { background-color: #4b5563; }
     .send-button { background-color: #2563eb; color: white; width: 2.5rem; height: 2.5rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: background-color 0.2s; }
     .send-button:hover { background-color: #1d4ed8; }
+    .send-button:disabled { background-color: #4b5563; cursor: not-allowed; }
     .picker-menu { position: absolute; bottom: 50px; left: 10px; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; }
     .emoji-picker { display: flex; flex-wrap: wrap; max-width: 300px; max-height: 200px; overflow-y: auto; }
     .emoji-picker span { cursor: pointer; margin: 2px; font-size: 1.2rem; }
@@ -369,6 +370,7 @@
 
 
 <script src="https://unpkg.com/@streamr/sdk@latest/dist/streamr-sdk.web.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/streamsaver@2.0.6/StreamSaver.min.js"></script>
 <script>
     // --- CONFIGURATION ---
     const CHAT_STREAM_ID = '0xd5a8024414f59cf0c453c35fc3655a31251645f6/app1';
@@ -387,6 +389,7 @@
     const TYPING_INDICATOR_TIMEOUT = 1000;
     const MAX_CONCURRENT_REQUESTS = 8;
     const PIECE_REQUEST_TIMEOUT = 7000;
+    const MAX_BLOB_ASSEMBLY_SIZE = 100 * 1024 * 1024; // 100 MB
 
     // --- STATE VARIABLES ---
     let streamr;
@@ -712,24 +715,21 @@
                 const frameData = event.data.frame;
 
                 const password = roomPasswords.get(currentRoomId);
+                let payload = { roomId: currentRoomId, streamId: currentLiveStreamId, frame: frameData };
+
                 if (password) {
-                    try {
-                        const key = await deriveKeyFromPassword(password, currentRoomId);
-                        const encrypted = await encryptMessage(frameData, key);
-                        streamr.publish(VIDEO_STREAM_ID, {
-                            roomId: currentRoomId,
-                            streamId: currentLiveStreamId,
-                            type: 'encrypted_frame',
-                            iv: encrypted.iv,
-                            payload: encrypted.content
-                        });
-                    } catch (e) {
-                        console.error("Failed to encrypt video frame:", e);
-                    }
-                } else {
-                    // 1. Publish to network for others
-                    streamr.publish(VIDEO_STREAM_ID, { roomId: currentRoomId, streamId: currentLiveStreamId, frame: frameData });
+                    const key = await deriveKeyFromPassword(password, currentRoomId);
+                    const encrypted = await encryptMessage(frameData, key);
+                    payload = {
+                        roomId: currentRoomId,
+                        streamId: currentLiveStreamId,
+                        encryptedFrame: encrypted.content,
+                        iv: encrypted.iv
+                    };
                 }
+
+                // 1. Publish to network for others
+                streamr.publish(VIDEO_STREAM_ID, payload);
                 
                 // 2. Local loopback to render on our own screen
                 const localStreamInfo = remoteStreams.get(currentLiveStreamId);
@@ -837,7 +837,6 @@
         } else if (message.type === 'file_announce' || message.type === 'video_announce') {
             const { fileId, fileName, fileSize } = message.metadata;
             const isOwnFile = metadata.publisherId === myPublisherId;
-            const isVideo = message.type === 'video_announce';
 
             const senderButton = `
                 <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
@@ -847,20 +846,11 @@
                     <span>Seeding</span>
                 </button>`;
             
-            const playButton = `
-                 <button class="file-button flex items-center justify-center gap-2" data-action="start-download" data-file-id="${fileId}">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
-                    </svg>
-                    <span>Play</span>
-                </button>
-            `;
-
             const downloadButton = `<button class="file-button" data-action="start-download" data-file-id="${fileId}">Download</button>`;
 
             const receiverInteractionHTML = `
                 <div id="file-interaction-${fileId}" class="flex flex-col items-start gap-y-1 mt-2">
-                    ${isVideo ? playButton : downloadButton}
+                    ${downloadButton}
                     <span class="seeder-count text-xs text-gray-500" data-file-id="${fileId}"></span>
                 </div>
             `;
@@ -877,7 +867,6 @@
             if (!isOwnFile) {
                 incomingFiles.set(fileId, {
                     metadata: message.metadata,
-                    pieces: new Array(message.metadata.pieceHashes.length).fill(null),
                     pieceStatus: new Array(message.metadata.pieceHashes.length).fill('pending'),
                     requestsInFlight: new Map(),
                     receivedCount: 0
@@ -1198,21 +1187,19 @@
             const data = loadedImages.get(dataId);
             try {
                 const password = roomPasswords.get(currentRoomId);
+                let payload = { roomId: currentRoomId, id: dataId, data: data };
+
                 if (password) {
-                    // Re-encrypt for historical requests in private rooms to maintain privacy
                     const key = await deriveKeyFromPassword(password, currentRoomId);
                     const encrypted = await encryptMessage(data, key);
-                    await streamr.publish(IMAGE_STREAM_ID, {
+                    payload = {
                         roomId: currentRoomId,
                         id: dataId,
-                        type: 'encrypted_image',
-                        iv: encrypted.iv,
-                        payload: encrypted.content
-                    });
-                } else {
-                    // Public room, send as is
-                    await streamr.publish(IMAGE_STREAM_ID, { roomId: currentRoomId, id: dataId, data: data, type: 'image' });
+                        encryptedData: encrypted.content,
+                        iv: encrypted.iv
+                    };
                 }
+                await streamr.publish(IMAGE_STREAM_ID, payload);
             }
             catch (err) { console.error(`Failed to respond to image request`, err); }
         }
@@ -1302,35 +1289,28 @@
 
     async function handleImageMessage(message) {
         if (message.roomId !== currentRoomId) return;
-        
-        let imageData = null;
 
-        if (message.type === 'encrypted_image') {
+        let imageData = message.data;
+        if (message.encryptedData) {
             const password = roomPasswords.get(currentRoomId);
-            if(password) {
-                try {
-                    const key = await deriveKeyFromPassword(password, currentRoomId);
-                    const decryptedData = await decryptMessage(message.payload, key, message.iv);
-                    if (decryptedData) {
-                        imageData = decryptedData;
-                    }
-                } catch (e) { console.error("Failed to decrypt image", e); }
+            if (password) {
+                const key = await deriveKeyFromPassword(password, currentRoomId);
+                const decryptedData = await decryptMessage(message.encryptedData, key, message.iv);
+                if (decryptedData) {
+                    imageData = decryptedData;
+                } else {
+                    console.error("Failed to decrypt image data for ID:", message.id);
+                    return; 
+                }
+            } else {
+                return; 
             }
-        } else {
-            imageData = message.data;
         }
-
-        if (imageData) {
-            loadedImages.set(message.id, imageData);
-            const imgContainer = document.querySelector(`[data-image-id="${message.id}"]`);
-            if (imgContainer) {
-                imgContainer.innerHTML = `<img src="${imageData}" class="max-w-xs rounded-md" />`;
-            }
-        } else {
-             const imgContainer = document.querySelector(`[data-image-id="${message.id}"]`);
-             if (imgContainer) {
-                imgContainer.textContent = '🔒 Failed to decrypt image.';
-             }
+        
+        loadedImages.set(message.id, imageData);
+        const imgContainer = document.querySelector(`[data-image-id="${message.id}"]`);
+        if (imgContainer) {
+            imgContainer.innerHTML = `<img src="${imageData}" class="max-w-xs rounded-md" />`;
         }
     }
 
@@ -1341,82 +1321,41 @@
                 if (localFiles.has(message.fileId) && message.targetSeederId === myPublisherId) {
                     await sendPiece(message.fileId, message.pieceIndex);
                 }
-            } else if (message.type === 'file_piece_encrypted') {
-                if (metadata.publisherId === myPublisherId) return;
-
-                const { fileId, pieceIndex, payload, iv } = message;
-                const transfer = incomingFiles.get(fileId);
-                if (!transfer || transfer.pieceStatus[pieceIndex] !== 'requested') return;
-
-                const password = roomPasswords.get(currentRoomId);
-                if (!password) return; // Cannot decrypt without password
-
-                const key = await deriveKeyFromPassword(password, currentRoomId);
-                const data = await decryptMessage(payload, key, iv);
-
-                if (!data) { // Decryption failed
-                    transfer.pieceStatus[pieceIndex] = 'pending'; // Mark for retry
-                    clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
-                    transfer.requestsInFlight.delete(pieceIndex);
-                    manageDownload(fileId);
-                    return;
-                }
-                
-                const receivedHash = await sha1FromBase64(data);
-                if (receivedHash !== transfer.metadata.pieceHashes[pieceIndex]) {
-                    transfer.pieceStatus[pieceIndex] = 'pending'; // Mark for retry
-                    clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
-                    transfer.requestsInFlight.delete(pieceIndex);
-                    manageDownload(fileId);
-                    return;
-                }
-
-                const binaryString = atob(data);
-                const len = binaryString.length;
-                const bytes = new Uint8Array(len);
-                for (let i = 0; i < len; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                
-                clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
-                transfer.requestsInFlight.delete(pieceIndex);
-                transfer.pieces[pieceIndex] = bytes;
-                transfer.pieceStatus[pieceIndex] = 'done';
-                transfer.receivedCount++;
-
-                const progress = Math.round((transfer.receivedCount / transfer.metadata.pieceHashes.length) * 100);
-                const receivedMB = (transfer.receivedCount * PIECE_SIZE / 1024 / 1024).toFixed(2);
-                const totalMB = (transfer.metadata.fileSize / 1024 / 1024).toFixed(2);
-                const progressText = `Receiving... ${progress}% (${receivedMB}MB / ${totalMB}MB)`;
-                
-                const progressElement = document.querySelector(`#file-interaction-${fileId} .progress-text`);
-                if (progressElement) {
-                    progressElement.textContent = progressText;
-                }
-
-                if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
-                    assembleFile(fileId);
-                } else {
-                    manageDownload(fileId);
-                }
-
             } else if (message.type === 'file_piece') {
                 if (metadata.publisherId === myPublisherId) return;
 
-                const { fileId, pieceIndex, data } = message;
+                const { fileId, pieceIndex } = message;
                 const transfer = incomingFiles.get(fileId);
                 if (!transfer || transfer.pieceStatus[pieceIndex] !== 'requested') return;
                 
-                const receivedHash = await sha1FromBase64(data);
+                const password = roomPasswords.get(currentRoomId);
+                let decryptedBase64 = message.data;
+
+                if (password) {
+                    const key = await deriveKeyFromPassword(password, currentRoomId);
+                    const decrypted = await decryptMessage(message.encryptedData, key, message.iv);
+                    if (!decrypted) {
+                        console.error(`Decryption failed for piece ${pieceIndex} of file ${fileId}`);
+                        transfer.pieceStatus[pieceIndex] = 'pending';
+                        clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
+                        transfer.requestsInFlight.delete(pieceIndex);
+                        manageDownload(fileId);
+                        return;
+                    }
+                    decryptedBase64 = decrypted;
+                }
+
+                const receivedHash = await sha1FromBase64(decryptedBase64);
                 if (receivedHash !== transfer.metadata.pieceHashes[pieceIndex]) {
-                    transfer.pieceStatus[pieceIndex] = 'pending'; // Mark for retry
+                    console.error(`Hash mismatch for piece ${pieceIndex} of file ${fileId}`);
+                    transfer.pieceStatus[pieceIndex] = 'pending';
                     clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
                     transfer.requestsInFlight.delete(pieceIndex);
                     manageDownload(fileId);
                     return;
                 }
 
-                const binaryString = atob(data);
+                const binaryString = atob(decryptedBase64);
                 const len = binaryString.length;
                 const bytes = new Uint8Array(len);
                 for (let i = 0; i < len; i++) {
@@ -1425,22 +1364,36 @@
                 
                 clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
                 transfer.requestsInFlight.delete(pieceIndex);
-                transfer.pieces[pieceIndex] = bytes;
+
+                if (transfer.pieces) {
+                    transfer.pieces[pieceIndex] = bytes;
+                } else if (transfer.writer) {
+                    await transfer.writer.write(bytes);
+                }
+
                 transfer.pieceStatus[pieceIndex] = 'done';
                 transfer.receivedCount++;
 
                 const progress = Math.round((transfer.receivedCount / transfer.metadata.pieceHashes.length) * 100);
                 const receivedMB = (transfer.receivedCount * PIECE_SIZE / 1024 / 1024).toFixed(2);
                 const totalMB = (transfer.metadata.fileSize / 1024 / 1024).toFixed(2);
-                const progressText = `Receiving... ${progress}% (${receivedMB}MB / ${totalMB}MB)`;
                 
                 const progressElement = document.querySelector(`#file-interaction-${fileId} .progress-text`);
                 if (progressElement) {
-                    progressElement.textContent = progressText;
+                    progressElement.textContent = `Receiving... ${progress}% (${receivedMB}MB / ${totalMB}MB)`;
                 }
 
                 if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
-                    assembleFile(fileId);
+                    if (transfer.pieces) {
+                        assembleAndSeedFile(fileId);
+                    } else if (transfer.writer) {
+                        await transfer.writer.close();
+                        transfer.writer = null;
+                        const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
+                        if (interactionContainer) {
+                            interactionContainer.innerHTML = `<span class="text-green-400 text-xs">Download Complete</span>`;
+                        }
+                    }
                 } else {
                     manageDownload(fileId);
                 }
@@ -1501,24 +1454,26 @@
     // MODIFIED: Offloads frame decoding to a Web Worker
     async function handleVideoStreamMessage(message) {
         if (message.roomId !== currentRoomId) return;
-        const streamInfo = remoteStreams.get(message.streamId);
-        if (!streamInfo || !streamInfo.videoWorker) return;
 
-        if (message.type === 'encrypted_frame') {
+        let frameData = message.frame;
+        if (message.encryptedFrame) {
             const password = roomPasswords.get(currentRoomId);
             if (password) {
-                try {
-                    const key = await deriveKeyFromPassword(password, currentRoomId);
-                    const decryptedFrame = await decryptMessage(message.payload, key, message.iv);
-                    if (decryptedFrame) {
-                        streamInfo.videoWorker.postMessage({ frame: decryptedFrame });
-                    }
-                } catch (e) {
-                    console.error("Failed to decrypt video frame", e);
+                const key = await deriveKeyFromPassword(password, currentRoomId);
+                const decrypted = await decryptMessage(message.encryptedFrame, key, message.iv);
+                if (decrypted) {
+                    frameData = decrypted;
+                } else {
+                    return;
                 }
+            } else {
+                return;
             }
-        } else {
-            streamInfo.videoWorker.postMessage({ frame: message.frame });
+        }
+
+        const streamInfo = remoteStreams.get(message.streamId);
+        if (streamInfo && streamInfo.videoWorker) {
+            streamInfo.videoWorker.postMessage({ frame: frameData });
         }
     }
 
@@ -1527,30 +1482,27 @@
         if (message.roomId !== currentRoomId) return;
         if (message.streamId === currentLiveStreamId) return; 
 
-        let streamInfo = remoteStreams.get(message.streamId);
-        if (!streamInfo) return;
-
-        let audioDataArray;
-
-        if (message.type === 'encrypted_audio') {
+        let audioDataArray = message.audioData;
+        if (message.encryptedAudio) {
             const password = roomPasswords.get(currentRoomId);
             if (password) {
-                try {
-                    const key = await deriveKeyFromPassword(password, currentRoomId);
-                    const decryptedPayload = await decryptMessage(message.payload, key, message.iv);
-                    if (decryptedPayload) {
-                        audioDataArray = JSON.parse(decryptedPayload);
-                    }
-                } catch (e) {
-                    console.error("Failed to decrypt audio data", e);
+                const key = await deriveKeyFromPassword(password, currentRoomId);
+                const decrypted = await decryptMessage(message.encryptedAudio, key, message.iv);
+                if (decrypted) {
+                    audioDataArray = JSON.parse(decrypted);
+                } else {
                     return;
                 }
+            } else {
+                return;
             }
-        } else {
-            audioDataArray = message.audioData;
         }
 
-        if (!audioDataArray) return;
+
+        let streamInfo = remoteStreams.get(message.streamId);
+        if (!streamInfo) {
+            return;
+        }
 
         if (!streamInfo.audioContext) {
              streamInfo.audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -1572,29 +1524,27 @@
         source.start();
     }
 
-    async function handleReactionMessage(message) {
+    async function handleReactionMessage(message, metadata) {
         if (message.roomId !== currentRoomId) return;
 
-        let reactionData;
-
-        if (message.type === 'encrypted_reaction') {
+        let reactionMessage = message;
+        if (message.encryptedPayload) {
             const password = roomPasswords.get(currentRoomId);
             if (password) {
-                try {
-                    const key = await deriveKeyFromPassword(password, currentRoomId);
-                    const decryptedPayload = await decryptMessage(message.payload, key, message.iv);
-                    if (decryptedPayload) {
-                        reactionData = JSON.parse(decryptedPayload);
-                    }
-                } catch(e) { console.error("Failed to decrypt reaction", e); return; }
+                const key = await deriveKeyFromPassword(password, currentRoomId);
+                const decrypted = await decryptMessage(message.encryptedPayload, key, message.iv);
+                if (decrypted) {
+                    reactionMessage = JSON.parse(decrypted);
+                } else {
+                    return;
+                }
+            } else {
+                return;
             }
-        } else {
-            reactionData = message;
         }
+        
+        const { messageId, emoji, userId } = reactionMessage;
 
-        if (!reactionData) return;
-
-        const { messageId, emoji, userId } = reactionData;
         if (!messageReactions.has(messageId)) {
             messageReactions.set(messageId, {});
         }
@@ -1613,28 +1563,13 @@
 
     async function handleTypingMessage(message, metadata) {
         if (message.roomId !== currentRoomId) return;
-        if (metadata.publisherId === myPublisherId) return;
 
-        let isTyping = false;
-        if (message.type === 'encrypted_typing') {
-             const password = roomPasswords.get(currentRoomId);
-             if (password) {
-                try {
-                    const key = await deriveKeyFromPassword(password, currentRoomId);
-                    const decryptedPayload = await decryptMessage(message.payload, key, message.iv);
-                    if (decryptedPayload) {
-                        const typingData = JSON.parse(decryptedPayload);
-                        if (typingData.type === 'is_typing') {
-                             isTyping = true;
-                        }
-                    }
-                } catch (e) { console.error("Failed to decrypt typing indicator", e); }
-             }
-        } else if (message.type === 'is_typing') {
-            isTyping = true;
+        if(message.isEncrypted) {
+            const password = roomPasswords.get(currentRoomId);
+            if(!password) return; // Can't decrypt, so ignore
         }
-        
-        if (isTyping) {
+
+        if (metadata.publisherId !== myPublisherId) {
             typingUsers.set(metadata.publisherId, Date.now());
             updateTypingIndicatorUI();
         }
@@ -1780,32 +1715,34 @@
 
     async function sendMessage() {
         const text = messageInput.value.trim();
-        if (!text || !streamr) return;
+        if (!text || !streamr || sendBtn.disabled) return;
 
-        let messagePayload = {
-            type: 'text',
-            content: text,
-            id: crypto.randomUUID(),
-            nickname: myNickname,
-            realAddress: myRealAddress 
-        };
-
-        if (replyingTo) {
-            messagePayload.replyToMessageId = replyingTo.id || replyingTo.timestamp;
-            messagePayload.replyToUser = replyingTo.userId;
-            
-            let replySnippet = '';
-            if (replyingTo.type === 'text') {
-                replySnippet = replyingTo.content;
-            } else if (replyingTo.type === 'image') {
-                replySnippet = 'Image';
-            } else if (replyingTo.type === 'file_announce') {
-                replySnippet = `File: ${message.metadata.fileName}`;
-            }
-            messagePayload.replyToContent = replySnippet;
-        }
+        sendBtn.disabled = true;
 
         try {
+            let messagePayload = {
+                type: 'text',
+                content: text,
+                id: crypto.randomUUID(),
+                nickname: myNickname,
+                realAddress: myRealAddress 
+            };
+
+            if (replyingTo) {
+                messagePayload.replyToMessageId = replyingTo.id || replyingTo.timestamp;
+                messagePayload.replyToUser = replyingTo.userId;
+                
+                let replySnippet = '';
+                if (replyingTo.type === 'text') {
+                    replySnippet = replyingTo.content;
+                } else if (replyingTo.type === 'image') {
+                    replySnippet = 'Image';
+                } else if (replyingTo.type === 'file_announce') {
+                    replySnippet = `File: ${message.metadata.fileName}`;
+                }
+                messagePayload.replyToContent = replySnippet;
+            }
+
             const password = roomPasswords.get(currentRoomId);
             if (password) {
                 const key = await deriveKeyFromPassword(password, currentRoomId);
@@ -1832,25 +1769,30 @@
                 replyingTo = null;
                 replyingToContainer.classList.add('hidden');
             }
-        } catch (error) { console.error(error); showCustomAlert('Error', 'Failed to send message: ' + error.message); }
+        } catch (error) { 
+            console.error(error); 
+            showCustomAlert('Error', 'Failed to send message: ' + error.message); 
+        } finally {
+            sendBtn.disabled = false;
+        }
     }
     
     async function sendReaction(messageId, emoji) {
         if (!streamr) return;
         try {
+            const payload = { messageId, emoji, userId: myPublisherId };
             const password = roomPasswords.get(currentRoomId);
+
             if (password) {
-                const payload = { messageId, emoji, userId: myPublisherId };
                 const key = await deriveKeyFromPassword(password, currentRoomId);
                 const encrypted = await encryptMessage(JSON.stringify(payload), key);
-                await streamr.publish(REACTION_STREAM_ID, {
-                    roomId: currentRoomId,
-                    type: 'encrypted_reaction',
-                    iv: encrypted.iv,
-                    payload: encrypted.content
+                await streamr.publish(REACTION_STREAM_ID, { 
+                    roomId: currentRoomId, 
+                    encryptedPayload: encrypted.content, 
+                    iv: encrypted.iv 
                 });
             } else {
-                await streamr.publish(REACTION_STREAM_ID, { roomId: currentRoomId, messageId, emoji, userId: myPublisherId });
+                 await streamr.publish(REACTION_STREAM_ID, { roomId: currentRoomId, ...payload });
             }
         } catch (error) {
             console.error("Failed to send reaction:", error);
@@ -1861,19 +1803,11 @@
         if (!streamr) return;
         try {
             const password = roomPasswords.get(currentRoomId);
-            if (password) {
-                const payload = { type: 'is_typing' };
-                const key = await deriveKeyFromPassword(password, currentRoomId);
-                const encrypted = await encryptMessage(JSON.stringify(payload), key);
-                 await streamr.publish(TYPING_STREAM_ID, {
-                    roomId: currentRoomId,
-                    type: 'encrypted_typing',
-                    iv: encrypted.iv,
-                    payload: encrypted.content
-                });
-            } else {
-                await streamr.publish(TYPING_STREAM_ID, { roomId: currentRoomId, type: 'is_typing' });
+            let payload = { roomId: currentRoomId, type: 'is_typing' };
+            if(password) {
+                payload.isEncrypted = true;
             }
+            await streamr.publish(TYPING_STREAM_ID, payload);
         } catch(err) {
             console.error("Could not send typing signal", err);
         }
@@ -1917,10 +1851,23 @@
         }
         
         const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
+        let progressText = 'Starting... 0%';
+
+        if (transfer.metadata.fileSize < MAX_BLOB_ASSEMBLY_SIZE) {
+            transfer.pieces = new Array(transfer.metadata.pieceHashes.length).fill(null);
+            progressText = 'Downloading... 0%';
+        } else {
+            const fileStream = streamSaver.createWriteStream(transfer.metadata.fileName, {
+                size: transfer.metadata.fileSize
+            });
+            transfer.writer = fileStream.getWriter();
+            progressText = 'Downloading to disk... 0%';
+        }
+        
         if (interactionContainer) {
             interactionContainer.innerHTML = `
                 <div class="flex items-center gap-2">
-                    <span class="progress-text text-xs text-gray-400">Starting... 0%</span>
+                    <span class="progress-text text-xs text-gray-400">${progressText}</span>
                     <button class="cancel-download-btn text-gray-400 hover:text-white" title="Cancel Download" data-action="cancel-download" data-file-id="${fileId}">
                         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>
                     </button>
@@ -1933,18 +1880,18 @@
     function cancelDownload(fileId) {
         const transfer = incomingFiles.get(fileId);
         if (transfer) {
+            if (transfer.writer) {
+                transfer.writer.abort();
+                transfer.writer = null;
+            }
             transfer.requestsInFlight.forEach(({ timeoutId }) => clearTimeout(timeoutId));
             incomingFiles.delete(fileId);
             
             const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
-            const messageDiv = interactionContainer.closest('.message-entry');
-            const isVideo = messageDiv.querySelector('[id^="video-container-"]') !== null;
-
             if (interactionContainer) {
-                const playButton = `<button class="file-button" data-action="start-download" data-file-id="${fileId}">Play</button>`;
                 const downloadButton = `<button class="file-button" data-action="start-download" data-file-id="${fileId}">Download</button>`;
                 interactionContainer.innerHTML = `
-                    ${isVideo ? playButton : downloadButton}
+                    ${downloadButton}
                     <span class="seeder-count text-xs text-gray-500" data-file-id="${fileId}"></span>
                 `;
             }
@@ -2009,12 +1956,13 @@
     async function sendPiece(fileId, pieceIndex) {
         if (!streamr) return;
         try {
-            const { fileData } = localFiles.get(fileId);
-            if (!fileData) return;
+            const { file } = localFiles.get(fileId);
+            if (!file) return;
 
             const start = pieceIndex * PIECE_SIZE;
-            const end = Math.min(start + PIECE_SIZE, fileData.size);
-            const pieceBuffer = fileData.buffer.slice(start, end);
+            const end = Math.min(start + PIECE_SIZE, file.size);
+            const pieceBlob = file.slice(start, end);
+            const pieceBuffer = await pieceBlob.arrayBuffer();
             
             const data = arrayBufferToBase64(pieceBuffer);
             
@@ -2022,60 +1970,43 @@
             if (password) {
                 const key = await deriveKeyFromPassword(password, currentRoomId);
                 const encrypted = await encryptMessage(data, key);
-                await streamr.publish(FILE_STREAM_ID, {
-                    roomId: currentRoomId,
-                    type: 'file_piece_encrypted',
-                    fileId,
-                    pieceIndex,
-                    iv: encrypted.iv,
-                    payload: encrypted.content
-                });
+                await streamr.publish(FILE_STREAM_ID, { roomId: currentRoomId, type: 'file_piece', fileId, pieceIndex, encryptedData: encrypted.content, iv: encrypted.iv });
             } else {
-                await streamr.publish(FILE_STREAM_ID, { roomId: currentRoomId, type: 'file_piece', fileId, pieceIndex, data });
+                 await streamr.publish(FILE_STREAM_ID, { roomId: currentRoomId, type: 'file_piece', fileId, pieceIndex, data });
             }
         } catch (error) {
             console.error(`[Sender] Failed to send piece ${pieceIndex}:`, error);
         }
     }
 
-    async function assembleFile(fileId) {
+    async function assembleAndSeedFile(fileId) {
         const transfer = incomingFiles.get(fileId);
-        if (!transfer) return;
+        if (!transfer || !transfer.pieces) return;
 
+        const blob = new Blob(transfer.pieces, { type: transfer.metadata.fileType });
+        const newFile = new File([blob], transfer.metadata.fileName, { type: transfer.metadata.fileType });
+
+        localFiles.set(fileId, { file: newFile, metadata: transfer.metadata });
+        incomingFiles.delete(fileId);
+
+        const url = URL.createObjectURL(newFile);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = newFile.name;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
+        
         const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
-
-        const blob = new Blob(transfer.pieces, { type: transfer.metadata.fileType || 'application/octet-stream' });
-        if (!blob) {
-             if (interactionContainer) {
-                interactionContainer.innerHTML = `<span class="text-red-500 text-xs">Assembly Error</span>`;
-            }
-            return;
-        }
-
-        if (transfer.metadata.fileType && transfer.metadata.fileType.startsWith('video/')) {
-            const fileBuffer = await blob.arrayBuffer();
-            const fileData = { buffer: fileBuffer, name: transfer.metadata.fileName, size: transfer.metadata.fileSize, type: transfer.metadata.fileType };
-            localFiles.set(fileId, { fileData, metadata: transfer.metadata });
-            
-            const container = document.getElementById(`video-container-${fileId}`);
-            if (container) {
-                 const url = URL.createObjectURL(blob);
-                 container.innerHTML = `
-                    <div class="relative">
-                        <video controls autoplay class="max-w-xs rounded-md" src="${url}"></video>
-                        <div class="absolute top-2 left-2 bg-black bg-opacity-60 text-white text-xs rounded-md px-2 py-1 flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse mr-2" viewBox="0 0 20 20" fill="currentColor">
-                                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                            </svg>
-                            <span>Seeding</span>
-                        </div>
-                    </div>`;
-            }
-        } else {
-            transfer.blob = blob;
-            if (interactionContainer) {
-                 interactionContainer.innerHTML = `<button class="file-button" data-action="save" data-file-id="${fileId}">Save File</button>`;
-            }
+        if (interactionContainer) {
+            interactionContainer.innerHTML = `
+                <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                    </svg>
+                    <span>Seeding</span>
+                </button>`;
         }
     }
 
@@ -2198,25 +2129,20 @@
                 audioProcessor.onaudioprocess = async (e) => {
                     const audioData = e.inputBuffer.getChannelData(0);
                     const audioDataArray = Array.from(audioData);
-                    
+                    let payload = { roomId: currentRoomId, streamId: currentLiveStreamId, audioData: audioDataArray };
+
                     const password = roomPasswords.get(currentRoomId);
                     if (password) {
-                        try {
-                            const key = await deriveKeyFromPassword(password, currentRoomId);
-                            const encrypted = await encryptMessage(JSON.stringify(audioDataArray), key);
-                            streamr.publish(AUDIO_STREAM_ID, {
-                                roomId: currentRoomId,
-                                streamId: currentLiveStreamId,
-                                type: 'encrypted_audio',
-                                iv: encrypted.iv,
-                                payload: encrypted.content
-                            });
-                        } catch(err) {
-                            console.error("Failed to encrypt audio data:", err);
-                        }
-                    } else {
-                        streamr.publish(AUDIO_STREAM_ID, { roomId: currentRoomId, streamId: currentLiveStreamId, audioData: audioDataArray });
+                        const key = await deriveKeyFromPassword(password, currentRoomId);
+                        const encrypted = await encryptMessage(JSON.stringify(audioDataArray), key);
+                        payload = { 
+                            roomId: currentRoomId, 
+                            streamId: currentLiveStreamId, 
+                            encryptedAudio: encrypted.content, 
+                            iv: encrypted.iv 
+                        };
                     }
+                    streamr.publish(AUDIO_STREAM_ID, payload);
                 };
 
                 source.connect(audioProcessor);
@@ -2357,23 +2283,22 @@
                 
                 resizeImage(file, async (base64Data) => {
                     try {
-                        const password = roomPasswords.get(currentRoomId);
-                        if (password) {
-                            const key = await deriveKeyFromPassword(password, currentRoomId);
-                            const encrypted = await encryptMessage(base64Data, key);
-                            await streamr.publish(IMAGE_STREAM_ID, {
-                                roomId: currentRoomId,
-                                id: dataId,
-                                type: 'encrypted_image',
-                                iv: encrypted.iv,
-                                payload: encrypted.content
-                            });
-                            loadedImages.set(dataId, base64Data); // Keep the unencrypted version for local display
-                        } else {
-                            loadedImages.set(dataId, base64Data);
-                            if (streamr) {
-                                await streamr.publish(IMAGE_STREAM_ID, { roomId: currentRoomId, id: dataId, data: base64Data, type: 'image' });
+                        loadedImages.set(dataId, base64Data);
+                        if (streamr) {
+                            const password = roomPasswords.get(currentRoomId);
+                            let payload = { roomId: currentRoomId, id: dataId, data: base64Data };
+
+                            if (password) {
+                                const key = await deriveKeyFromPassword(password, currentRoomId);
+                                const encrypted = await encryptMessage(base64Data, key);
+                                payload = { 
+                                    roomId: currentRoomId, 
+                                    id: dataId, 
+                                    encryptedData: encrypted.content, 
+                                    iv: encrypted.iv 
+                                };
                             }
+                            await streamr.publish(IMAGE_STREAM_ID, payload);
                         }
                     } catch (error) {
                         console.error(`Failed to send image:`, error);
@@ -2413,10 +2338,12 @@
                     messagesContainer.appendChild(tempMsgDiv);
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
-                const fileBuffer = await file.arrayBuffer();
-                const fileData = { buffer: fileBuffer, name: file.name, size: file.size, type: file.type };
-                
-                fileWorker.postMessage({ fileData, tempId, intent: selectedFileIntent });
+                // Associate the file object with the temp ID for later retrieval
+                localFiles.set(tempId, { file: file });
+
+                const fileStream = file.stream();
+                const fileData = { name: file.name, size: file.size, type: file.type };
+                fileWorker.postMessage({ fileStream, fileData, tempId, intent: selectedFileIntent }, [fileStream]);
             }
         });
 
@@ -2508,35 +2435,6 @@
                 } else if (action === 'cancel-download') {
                     e.preventDefault();
                     cancelDownload(fileId);
-                } else if (action === 'save') {
-                    e.preventDefault();
-                    const transfer = incomingFiles.get(fileId);
-                    if (transfer && transfer.blob) {
-                        const url = URL.createObjectURL(transfer.blob);
-                        const tempLink = document.createElement('a');
-                        tempLink.href = url;
-                        tempLink.download = transfer.metadata.fileName;
-                        document.body.appendChild(tempLink);
-                        tempLink.click();
-                        document.body.removeChild(tempLink);
-                        URL.revokeObjectURL(url);
-
-                        const fileBuffer = await transfer.blob.arrayBuffer();
-                        const fileData = { buffer: fileBuffer, name: transfer.metadata.fileName, size: transfer.metadata.fileSize, type: transfer.metadata.fileType };
-                        localFiles.set(fileId, { fileData, metadata: transfer.metadata });
-
-                        const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
-                        if (interactionContainer) {
-                            interactionContainer.innerHTML = `
-                                <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
-                                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                                    </svg>
-                                    <span>Seeding</span>
-                                </button>
-                            `;
-                        }
-                    }
                 }
             }
 
@@ -2843,18 +2741,35 @@
             }
 
             self.onmessage = async (event) => {
-                const { fileData, tempId, intent } = event.data;
+                const { fileStream, fileData, tempId, intent } = event.data;
                 const PIECE_SIZE = ${PIECE_SIZE}; 
 
                 const pieceHashes = [];
-                const totalPieces = Math.ceil(fileData.size / PIECE_SIZE);
-                
-                for (let i = 0; i < totalPieces; i++) {
-                    const start = i * PIECE_SIZE;
-                    const end = Math.min(start + PIECE_SIZE, fileData.size);
-                    const pieceBuffer = fileData.buffer.slice(start, end);
-                    const hash = await calculateSHA1(pieceBuffer);
-                    pieceHashes.push(hash);
+                const reader = fileStream.getReader();
+
+                let buffer = new Uint8Array(0);
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        if (buffer.length > 0) {
+                            const hash = await calculateSHA1(buffer.buffer);
+                            pieceHashes.push(hash);
+                        }
+                        break;
+                    }
+
+                    const newBuffer = new Uint8Array(buffer.length + value.length);
+                    newBuffer.set(buffer);
+                    newBuffer.set(value, buffer.length);
+                    buffer = newBuffer;
+
+                    while (buffer.length >= PIECE_SIZE) {
+                        const chunkToHash = buffer.slice(0, PIECE_SIZE);
+                        const hash = await calculateSHA1(chunkToHash.buffer);
+                        pieceHashes.push(hash);
+                        buffer = buffer.slice(PIECE_SIZE);
+                    }
                 }
 
                 const metadata = {
@@ -2865,7 +2780,7 @@
                     pieceHashes: pieceHashes
                 };
                 
-                self.postMessage({ status: 'complete', metadata: metadata, fileData: fileData, tempId: tempId, intent: intent });
+                self.postMessage({ status: 'complete', metadata: metadata, tempId: tempId, intent: intent });
             };
         `;
 
@@ -2873,9 +2788,15 @@
         fileWorker = new Worker(URL.createObjectURL(blob));
 
         fileWorker.onmessage = async (event) => {
-            const { status, metadata, fileData, tempId, intent } = event.data;
+            const { status, metadata, tempId, intent } = event.data;
             if (status === 'complete') {
-                localFiles.set(metadata.fileId, { fileData, metadata });
+                const tempFileRef = localFiles.get(tempId);
+                if (!tempFileRef) {
+                    console.error("Could not find original file reference for", tempId);
+                    return;
+                }
+                localFiles.delete(tempId);
+                localFiles.set(metadata.fileId, { file: tempFileRef.file, metadata });
                 
                 const messageId = crypto.randomUUID();
                 const messageType = intent === 'video' ? 'video_announce' : 'file_announce';
@@ -3024,3 +2945,5 @@
 </script>
 </body>
 </html>
+
+
