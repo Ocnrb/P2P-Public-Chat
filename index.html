@@ -31,7 +31,7 @@
     .input-button { background-color: #374151; color: white; width: 2.5rem; height: 2.5rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; margin-right: 0.5rem; transition: background-color 0.2s; }
     .input-button:hover { background-color: #4b5563; }
     .send-button { background-color: #2563eb; color: white; width: 2.5rem; height: 2.5rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: background-color 0.2s; }
-    .send-button:hover { background-color: #1d4ed8; }
+    .send-button:hover:not(:disabled) { background-color: #1d4ed8; }
     .send-button:disabled { background-color: #4b5563; cursor: not-allowed; }
     .picker-menu { position: absolute; bottom: 50px; left: 10px; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; }
     .emoji-picker { display: flex; flex-wrap: wrap; max-width: 300px; max-height: 200px; overflow-y: auto; }
@@ -56,7 +56,7 @@
     .message-actions { position: absolute; bottom: -12px; left: -12px; display: none; gap: 4px; background-color: #374151; border-radius: 12px; padding: 2px 4px; z-index: 5; }
     .message-bubble:hover .message-actions { display: flex; }
     .reply-button, .react-button { cursor: pointer; font-size: 16px; }
-    .reaction-picker { position: absolute; background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; display: none; flex-wrap: wrap; gap: 4px; max-width: 200px; }
+    .reaction-picker { position: fixed; /* Use fixed positioning */ background-color: #1e1e1e; border: 1px solid #333; border-radius: 0.5rem; padding: 0.5rem; z-index: 10; display: none; flex-wrap: wrap; gap: 4px; max-width: 200px; }
     .reaction-picker span { cursor: pointer; font-size: 1.2rem; }
     .spinner { border: 2px solid #f3f3f3; border-top: 2px solid #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; display: inline-block; margin-right: 8px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -240,19 +240,33 @@
 </div>
 
 <div id="aboutModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
+    <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300 max-h-[90vh] overflow-y-auto">
         <h2 class="text-2xl font-bold mb-4 text-white">About This Chat</h2>
         <p class="mb-4">Data is transmitted P2P in real-time via the <a href="https://docs.streamr.network/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Streamr</a> pub/sub network.</p>
-        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of simultaneous users, while ensuring secure, <span class="text-cyan-400 font-semibold">tamper-proof</span>, and resilient communication without relying on central servers.</p>
-        <div class="bg-yellow-900 border-l-4 border-yellow-500 text-yellow-100 p-4 rounded-r-lg">
+        <p class="mb-6">By running the application, each user becomes a node in the network, allowing it to scale effortlessly to thousands of simultaneous users, while ensuring secure, <span class="font-semibold">tamper-proof</span>, and resilient communication without relying on central servers.</p>
+        
+        <p class="mb-4">This app is a self-contained single HTML file. This makes it highly resilient, as it can be hosted on countless services or even run locally from your computer. If one link goes down, another can be used. Here are a few examples:</p>
+        <ul class="list-disc list-inside mb-6 space-y-2 text-sm">
+            <li><a href="https://p2p-public-chat.vercel.app/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Hosted on Vercel</a></li>
+            <li><a href="https://p2p-public-chat.netlify.app/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Hosted on Netlify</a></li>
+            <li><a href="https://public-chat.edgeone.app/" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Hosted on EdgeOne</a></li>
+        </ul>
+        
+        <button id="downloadAppBtn" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+            Download App (.html)
+        </button>
+
+        <div class="bg-yellow-900 border-l-4 border-yellow-500 text-yellow-100 p-4 rounded-r-lg mt-4">
             <h3 class="font-bold">Security Warning</h3>
             <p>This is a public and unmoderated chat. Be cautious when downloading files from unknown users, as they may contain malicious software.</p>
         </div>
-        <button id="closeModalBtn" class="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+       
+        <button id="closeModalBtn" class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
             Close
         </button>
     </div>
 </div>
+
 
 <div id="customAlertModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-[#1e1e1e] rounded-lg p-8 max-w-md w-full text-gray-300">
@@ -393,6 +407,7 @@
 
     // --- STATE VARIABLES ---
     let streamr;
+    let db;
     let currentRoomId = 'Lobby'; // Changed default room to 'Lobby'
     let roomPasswords = new Map(); // New state for private room passwords
     let fileWorker;
@@ -461,6 +476,7 @@
     const aboutBtn = document.getElementById('aboutBtn');
     const aboutModal = document.getElementById('aboutModal');
     const closeModalBtn = document.getElementById('closeModalBtn');
+    const downloadAppBtn = document.getElementById('downloadAppBtn');
     const videoPreviewModal = document.getElementById('videoPreviewModal');
     const localVideoPreview = document.getElementById('localVideoPreview');
     const stopStreamBtn = document.getElementById('stopStreamBtn');
@@ -507,6 +523,63 @@
     const privateRoomCheckbox = document.getElementById('privateRoomCheckbox');
     const passwordContainer = document.getElementById('passwordContainer');
     const roomPasswordInput = document.getElementById('roomPasswordInput');
+
+    // --- INDEXEDDB HELPER FUNCTIONS ---
+    function initDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open('FilePiecesDB', 1);
+            request.onupgradeneeded = (event) => {
+                const dbInstance = event.target.result;
+                dbInstance.createObjectStore('pieces', { keyPath: ['fileId', 'pieceIndex'] });
+            };
+            request.onsuccess = (event) => {
+                db = event.target.result;
+                resolve();
+            };
+            request.onerror = (event) => {
+                console.error("IndexedDB error:", event.target.errorCode);
+                reject(event.target.errorCode);
+            };
+        });
+    }
+
+    function savePiece(fileId, pieceIndex, data) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(['pieces'], 'readwrite');
+            const store = transaction.objectStore('pieces');
+            const request = store.put({ fileId, pieceIndex, data });
+            request.onsuccess = () => resolve();
+            request.onerror = (event) => reject(event.target.error);
+        });
+    }
+
+    function getAllPiecesAsFile(fileId, fileName, fileType) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(['pieces'], 'readonly');
+            const store = transaction.objectStore('pieces');
+            const range = IDBKeyRange.bound([fileId, 0], [fileId, Infinity]);
+            const request = store.getAll(range);
+
+            request.onsuccess = (event) => {
+                const piecesData = event.target.result.map(p => p.data);
+                const blob = new Blob(piecesData, { type: fileType });
+                const file = new File([blob], fileName, { type: fileType });
+                resolve(file);
+            };
+            request.onerror = (event) => reject(event.target.error);
+        });
+    }
+
+    function clearFile(fileId) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(['pieces'], 'readwrite');
+            const store = transaction.objectStore('pieces');
+            const range = IDBKeyRange.bound([fileId, 0], [fileId, Infinity]);
+            const request = store.delete(range);
+            request.onsuccess = () => resolve();
+            request.onerror = (event) => reject(event.target.error);
+        });
+    }
 
 
     // --- ENCRYPTION HELPER FUNCTIONS ---
@@ -1365,8 +1438,8 @@
                 clearTimeout(transfer.requestsInFlight.get(pieceIndex).timeoutId);
                 transfer.requestsInFlight.delete(pieceIndex);
 
-                if (transfer.pieces) {
-                    transfer.pieces[pieceIndex] = bytes;
+                if (transfer.useIndexedDB) {
+                    await savePiece(fileId, pieceIndex, bytes);
                 } else if (transfer.writer) {
                     await transfer.writer.write(bytes);
                 }
@@ -1384,7 +1457,7 @@
                 }
 
                 if (transfer.receivedCount === transfer.metadata.pieceHashes.length) {
-                    if (transfer.pieces) {
+                    if (transfer.useIndexedDB) {
                         assembleAndSeedFile(fileId);
                     } else if (transfer.writer) {
                         await transfer.writer.close();
@@ -1851,17 +1924,17 @@
         }
         
         const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
-        let progressText = 'Starting... 0%';
+        let progressText;
 
         if (transfer.metadata.fileSize < MAX_BLOB_ASSEMBLY_SIZE) {
-            transfer.pieces = new Array(transfer.metadata.pieceHashes.length).fill(null);
-            progressText = 'Downloading... 0%';
+            transfer.useIndexedDB = true;
+            progressText = 'Receiving... 0%';
         } else {
             const fileStream = streamSaver.createWriteStream(transfer.metadata.fileName, {
                 size: transfer.metadata.fileSize
             });
             transfer.writer = fileStream.getWriter();
-            progressText = 'Downloading to disk... 0%';
+            progressText = 'Saving to disk... 0%';
         }
         
         if (interactionContainer) {
@@ -1877,12 +1950,15 @@
         manageDownload(fileId);
     }
     
-    function cancelDownload(fileId) {
+    async function cancelDownload(fileId) {
         const transfer = incomingFiles.get(fileId);
         if (transfer) {
             if (transfer.writer) {
                 transfer.writer.abort();
                 transfer.writer = null;
+            }
+            if (transfer.useIndexedDB) {
+                await clearFile(fileId);
             }
             transfer.requestsInFlight.forEach(({ timeoutId }) => clearTimeout(timeoutId));
             incomingFiles.delete(fileId);
@@ -1981,32 +2057,38 @@
 
     async function assembleAndSeedFile(fileId) {
         const transfer = incomingFiles.get(fileId);
-        if (!transfer || !transfer.pieces) return;
+        if (!transfer) return;
 
-        const blob = new Blob(transfer.pieces, { type: transfer.metadata.fileType });
-        const newFile = new File([blob], transfer.metadata.fileName, { type: transfer.metadata.fileType });
+        try {
+            const newFile = await getAllPiecesAsFile(fileId, transfer.metadata.fileName, transfer.metadata.fileType);
+            
+            await clearFile(fileId);
 
-        localFiles.set(fileId, { file: newFile, metadata: transfer.metadata });
-        incomingFiles.delete(fileId);
+            localFiles.set(fileId, { file: newFile, metadata: transfer.metadata });
+            incomingFiles.delete(fileId);
 
-        const url = URL.createObjectURL(newFile);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = newFile.name;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        a.remove();
-        
-        const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
-        if (interactionContainer) {
-            interactionContainer.innerHTML = `
-                <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                    </svg>
-                    <span>Seeding</span>
-                </button>`;
+            const url = URL.createObjectURL(newFile);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = newFile.name;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            a.remove();
+            
+            const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
+            if (interactionContainer) {
+                interactionContainer.innerHTML = `
+                    <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                        </svg>
+                        <span>Seeding</span>
+                    </button>`;
+            }
+        } catch(error) {
+            console.error("Error assembling file from DB:", error);
+            showCustomAlert("Download Error", "Could not assemble the file after download.");
         }
     }
 
@@ -2213,6 +2295,24 @@
             replyingToText.textContent = contentSnippet;
             replyingToContainer.classList.remove('hidden');
             messageInput.focus();
+        }
+    }
+
+    function downloadApp() {
+        try {
+            const htmlContent = document.documentElement.outerHTML;
+            const blob = new Blob([htmlContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'public-chat.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Failed to download app:", error);
+            showCustomAlert("Download Error", "Could not prepare the file for download.");
         }
     }
 
@@ -2450,8 +2550,16 @@
                     }
                     picker.style.display = 'flex';
                     const rect = target.getBoundingClientRect();
+                    
                     picker.style.top = `${rect.top - picker.offsetHeight - 5}px`;
-                    picker.style.left = `${rect.left - picker.offsetWidth / 2 + rect.width / 2}px`;
+
+                    const idealLeft = rect.left - (picker.offsetWidth / 2) + (rect.width / 2);
+                    let finalLeft = Math.max(10, idealLeft);
+                    if (finalLeft + picker.offsetWidth > window.innerWidth - 10) {
+                        finalLeft = window.innerWidth - picker.offsetWidth - 10;
+                    }
+                    
+                    picker.style.left = `${finalLeft}px`;
                     picker.dataset.messageId = target.dataset.messageId;
                 } else if (target.classList.contains('reply-button')) {
                     const messageId = target.dataset.messageId;
@@ -2545,6 +2653,7 @@
         
         aboutBtn.addEventListener('click', () => aboutModal.classList.remove('hidden'));
         closeModalBtn.addEventListener('click', () => aboutModal.classList.add('hidden'));
+        downloadAppBtn.addEventListener('click', downloadApp);
         aboutModal.addEventListener('click', (e) => {
             if (e.target === aboutModal) {
                 aboutModal.classList.add('hidden');
@@ -2923,6 +3032,7 @@
 
     // --- INITIALIZATION LOGIC ---
     async function handlePageLoad() {
+        await initDB();
         setupFileWorker();
         setupEventListeners();
         const preferredAuth = localStorage.getItem('authMethod');
