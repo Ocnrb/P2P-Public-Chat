@@ -12,7 +12,7 @@
     img-src 'self' data: blob:;
     media-src 'self' blob:;
     worker-src 'self' blob:;
-    connect-src 'self' https: wss:;
+    connect-src 'self' https: wss: data:;
     frame-src https://jimmywarting.github.io;
 ">
 <title>Public Chat</title>
@@ -421,7 +421,9 @@
 
     const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
-
+    // const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+    // const MAX_VIDEO_SIZE = 100 * 1024 * 1024; // 100 MB
+    // const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
     // --- STATE VARIABLES ---
     let streamr;
@@ -733,12 +735,28 @@
             self.onmessage = async (event) => {
                 if (event.data.frame) {
                     try {
-                        const response = await fetch(event.data.frame);
-                        if (!response.ok) {
-                           throw new Error('Failed to fetch frame data');
+                        const dataUrl = event.data.frame;
+
+                        // Manually convert Data URL to Blob, avoiding fetch for CSP reasons
+                        const parts = dataUrl.split(',');
+                        if (parts.length < 2) {
+                             throw new Error('Invalid Data URL');
                         }
-                        const blob = await response.blob();
-                         if (blob.size === 0) {
+                        const metaPart = parts[0];
+                        const base64Data = parts[1];
+                        
+                        const meta = metaPart.split(';')[0].split(':')[1];
+                        
+                        const binaryString = self.atob(base64Data);
+                        const len = binaryString.length;
+                        const bytes = new Uint8Array(len);
+                        for (let i = 0; i < len; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        
+                        const blob = new Blob([bytes], { type: meta });
+
+                        if (blob.size === 0) {
                             return;
                         }
                         const imageBitmap = await createImageBitmap(blob);
@@ -2203,9 +2221,7 @@
 
             const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
 
-            // MODIFICATION: Check if the downloaded file is a video
             if (interactionContainer && transfer.metadata.fileType.startsWith('video/')) {
-                // If it's a video, create a video player
                 const url = URL.createObjectURL(newFile);
                 interactionContainer.innerHTML = `
                     <div class="relative">
@@ -2219,7 +2235,6 @@
                     </div>
                 `;
             } else {
-                // For other file types, trigger a download as before
                 const url = URL.createObjectURL(newFile);
                 const a = document.createElement('a');
                 a.href = url;
@@ -3247,5 +3262,4 @@
 </script>
 </body>
 </html>
-
 
