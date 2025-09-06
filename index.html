@@ -10,6 +10,7 @@
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     font-src https://fonts.gstatic.com;
     img-src 'self' data: blob:;
+    media-src 'self' blob:;
     worker-src 'self' blob:;
     connect-src 'self' https: wss:;
     frame-src https://jimmywarting.github.io;
@@ -31,7 +32,7 @@
     .own-message .message-bubble { background-color: #1f2937; color: #f0f0f0; border-radius: 1rem 1rem 0.25rem 1rem; }
     .other-message .message-bubble { background-color: #1e1e1e; color: #d1d5db; border-radius: 1rem 1rem 1rem 0.25rem; }
     .message-content { font-size: 0.9rem; line-height: 1.2rem; word-wrap: break-word; }
-    .message-content img, .message-content canvas { max-width: 100%; border-radius: 0.5rem; margin-top: 0.5rem; }
+    .message-content img, .message-content canvas, .message-content video { max-width: 100%; border-radius: 0.5rem; margin-top: 0.5rem; }
     .file-container { display: flex; align-items: center; gap: 0.75rem; }
     .file-button { background-color: #3b82f6; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-decoration: none; font-size: 0.875rem; transition: background-color 0.2s; border: none; cursor: pointer; text-align: center; }
     .file-button:hover:not(:disabled) { background-color: #2563eb; }
@@ -323,7 +324,7 @@
                 <select id="resolutionSelect" class="w-full bg-[#2a2a2a] border border-gray-600 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-400">
                     <option value="640x360">360p (Low)</option>
                     <option value="854x480" selected>480p (Medium)</option>
-                    <option value="1280x720">70p (High)</option>
+                    <option value="1280x720">720p (High)</option>
                 </select>
             </div>
 
@@ -412,7 +413,7 @@
     const MAX_MESSAGES = 500;
     const ONLINE_TIMEOUT = 15 * 1000;
     const IMAGE_MAX_WIDTH = 640;
-    const PIECE_SIZE =  128 * 1024;
+    const PIECE_SIZE =  512 * 1024;
     const TYPING_INDICATOR_TIMEOUT = 1000;
     const MAX_CONCURRENT_REQUESTS = 8;
     const PIECE_REQUEST_TIMEOUT = 30000;
@@ -963,6 +964,7 @@
         } else if (message.type === 'file_announce' || message.type === 'video_announce') {
             const { fileId, fileName, fileSize } = message.metadata;
             const isOwnFile = metadata.publisherId === myPublisherId;
+            const isVideo = message.type === 'video_announce';
 
             const senderButton = `
                 <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
@@ -972,11 +974,20 @@
                     <span>Seeding</span>
                 </button>`;
             
+            const playButton = `
+                 <button class="file-button flex items-center justify-center gap-2" data-action="start-download" data-file-id="${fileId}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                    </svg>
+                    <span>Play</span>
+                </button>
+            `;
+
             const downloadButton = `<button class="file-button" data-action="start-download" data-file-id="${fileId}">Download</button>`;
 
             const receiverInteractionHTML = `
                 <div id="file-interaction-${fileId}" class="flex flex-col items-start gap-y-1 mt-2">
-                    ${downloadButton}
+                    ${isVideo ? playButton : downloadButton}
                     <span class="seeder-count text-xs text-gray-500" data-file-id="${fileId}"></span>
                 </div>
             `;
@@ -2192,24 +2203,43 @@
             localFiles.set(fileId, { file: newFile, metadata: transfer.metadata });
             incomingFiles.delete(fileId);
 
-            const url = URL.createObjectURL(newFile);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = newFile.name;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            a.remove();
-            
             const interactionContainer = document.getElementById(`file-interaction-${fileId}`);
-            if (interactionContainer) {
+
+            // MODIFICATION: Check if the downloaded file is a video
+            if (interactionContainer && transfer.metadata.fileType.startsWith('video/')) {
+                // If it's a video, create a video player
+                const url = URL.createObjectURL(newFile);
                 interactionContainer.innerHTML = `
-                    <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-                        </svg>
-                        <span>Seeding</span>
-                    </button>`;
+                    <div class="relative">
+                        <video controls class="max-w-xs rounded-md" src="${url}"></video>
+                        <div class="absolute top-2 left-2 bg-black bg-opacity-60 text-white text-xs rounded-md px-2 py-1 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                            </svg>
+                            <span>Seeding</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // For other file types, trigger a download as before
+                const url = URL.createObjectURL(newFile);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = newFile.name;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+                
+                if (interactionContainer) {
+                    interactionContainer.innerHTML = `
+                        <button class="file-button flex items-center justify-center gap-2" data-file-id="${fileId}" disabled>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 animate-pulse" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                            </svg>
+                            <span>Seeding</span>
+                        </button>`;
+                }
             }
         } catch(error) {
             console.error("Error assembling file from DB:", error);
@@ -3219,4 +3249,5 @@
 </script>
 </body>
 </html>
+
 
