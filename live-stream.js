@@ -173,6 +173,13 @@ export async function startVideoStream(deviceId, options) {
             state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const source = state.audioContext.createMediaStreamSource(state.localMediaStream);
             state.audioProcessor = state.audioContext.createScriptProcessor(4096, 1, 1);
+            
+            // --- FIX START ---
+            // Create a GainNode to mute the output and prevent feedback.
+            const gainNode = state.audioContext.createGain();
+            gainNode.gain.setValueAtTime(0, state.audioContext.currentTime);
+            // --- FIX END ---
+
             state.audioProcessor.onaudioprocess = async (e) => {
                 const audioDataArray = Array.from(e.inputBuffer.getChannelData(0));
                 const password = state.roomPasswords.get(state.currentRoomId);
@@ -191,9 +198,13 @@ export async function startVideoStream(deviceId, options) {
                 state.streamr.publish(config.AUDIO_STREAM_ID, payload);
             };
             source.connect(state.audioProcessor);
-            // The line below was connecting the user's mic input to their own speakers.
-            // By removing it, we prevent audio feedback during video streams.
-            // state.audioProcessor.connect(state.audioContext.destination);
+            
+            // --- FIX START ---
+            // Connect the processor to the muted GainNode, and the GainNode to the destination.
+            // This keeps the audio graph active without causing local feedback.
+            state.audioProcessor.connect(gainNode);
+            gainNode.connect(state.audioContext.destination);
+            // --- FIX END ---
         }
     } catch (err) {
         ui.showCustomAlert("Access Denied", "Could not access camera/microphone.");
@@ -285,5 +296,3 @@ export async function stopLiveStream() {
     }
     state.currentStreamType = null;
 }
-
-
