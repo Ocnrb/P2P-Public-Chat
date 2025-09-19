@@ -85,4 +85,18 @@ export const passwordContainer = document.getElementById('passwordContainer');
 export const roomPasswordInput = document.getElementById('roomPasswordInput');
 export const pfsRoomCheckbox = document.getElementById('pfsRoomCheckbox');
 export const rekeyBtn = document.getElementById('rekeyBtn');
+export const securityOptionsContainer = document.getElementById('securityOptionsContainer');
+
+// Streamer Room UI
+export const streamerLayout = document.getElementById('streamerLayout');
+export const streamViewerPanel = document.getElementById('streamViewerPanel');
+export const streamerChatPanel = document.getElementById('streamerChatPanel');
+export const streamerChatContainer = document.getElementById('streamerChatContainer');
+export const messageInputStreamer = document.getElementById('messageInputStreamer');
+export const sendBtnStreamer = document.getElementById('sendBtnStreamer');
+export const chatOpacitySlider = document.getElementById('chatOpacitySlider');
+export const backToLobbyBtn = document.getElementById('backToLobbyBtn');
+export const viewerCounter = document.getElementById('viewerCounter');
+export const chatSettingsToggle = document.getElementById('chatSettingsToggle');
+export const chatSettingsContainer = document.getElementById('chatSettingsContainer');
 

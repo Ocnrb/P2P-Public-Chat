@@ -13,12 +13,15 @@ import * as streamr from './streamr.js';
 
 // --- EVENT LISTENERS ---
 function setupEventListeners() {
-    function adjustChatHeight() {
-        dom.chatUI.style.height = `${window.innerHeight}px`;
+    function adjustLayoutHeight() {
+        const vh = window.innerHeight;
+        dom.chatUI.style.height = `${vh}px`;
+        dom.streamerLayout.style.height = `${vh}px`;
         if (dom.messagesContainer) dom.messagesContainer.scrollTop = dom.messagesContainer.scrollHeight;
+        if (dom.streamerChatContainer) dom.streamerChatContainer.scrollTop = dom.streamerChatContainer.scrollHeight;
     }
-    window.addEventListener('resize', adjustChatHeight);
-    adjustChatHeight();
+    window.addEventListener('resize', adjustLayoutHeight);
+    adjustLayoutHeight();
 
     dom.sendImageBtn.addEventListener('click', () => { state.selectedFileIntent = 'image'; dom.imageInputFile.click(); });
     dom.sendVideoBtn.addEventListener('click', () => { state.selectedFileIntent = 'video'; dom.videoInputFile.click(); });
@@ -67,6 +70,8 @@ function setupEventListeners() {
             const tempMsgDiv = document.createElement('div');
             tempMsgDiv.id = tempId;
             tempMsgDiv.className = 'message-entry own-message';
+            
+            const container = state.currentRoomType === 'streamer' ? dom.streamerChatContainer : dom.messagesContainer;
 
             if (state.selectedFileIntent === 'video') {
                 const localUrl = URL.createObjectURL(file);
@@ -74,8 +79,8 @@ function setupEventListeners() {
             } else {
                 tempMsgDiv.innerHTML = `<div class="message-bubble"><div class="message-content flex items-center"><div class="spinner"></div><span>Processing ${utils.sanitizeHTML(file.name)}...</span></div></div>`;
             }
-            dom.messagesContainer.appendChild(tempMsgDiv);
-            dom.messagesContainer.scrollTop = dom.messagesContainer.scrollHeight;
+            container.appendChild(tempMsgDiv);
+            container.scrollTop = container.scrollHeight;
 
             state.localFiles.set(tempId, {file: file});
             const fileStream = file.stream();
@@ -122,12 +127,12 @@ function setupEventListeners() {
 
     dom.opacitySlider.addEventListener('input', (e) => dom.videoPreviewModal.style.opacity = e.target.value / 100);
 
-    dom.messagesContainer.addEventListener('click', async (e) => {
+    const messageClickHandler = async (e) => {
         const target = e.target;
         const seal = target.closest('.message-seal');
         if (seal) {
             const sealType = seal.dataset.sealType;
-            ui.showCustomAlert(sealType === 'live' ? 'Verified Live 🛡️' : 'Historical 🕒', sealType === 'live' ? 'Received directly from the network.' : 'Part of a shared history.');
+            ui.showCustomAlert(sealType === 'live' ? 'Verified Live 🛡️' : 'Historical 🕒', sealType === 'live' ? 'This message was received directly from the network and is cryptographically signed by the sender.' : 'This message is part of a conversation history shared by another user. Its content cannot be guaranteed.');
         }
 
         if (target.closest('.verification-seal')) {
@@ -182,7 +187,10 @@ function setupEventListeners() {
                 setTimeout(() => originalMessage.classList.remove('highlighted'), 1000);
             }
         }
-    });
+    };
+    
+    dom.messagesContainer.addEventListener('click', messageClickHandler);
+    dom.streamerChatContainer.addEventListener('click', messageClickHandler);
 
     const emojis = [
         '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
@@ -205,16 +213,56 @@ function setupEventListeners() {
     dom.emojiPicker.innerHTML = '';
     emojis.forEach(emoji => {
         const span = document.createElement('span'); span.textContent = emoji;
-        span.addEventListener('click', () => dom.messageInput.value += emoji);
+        span.addEventListener('click', () => {
+             const input = state.currentRoomType === 'streamer' ? dom.messageInputStreamer : dom.messageInput;
+             input.value += emoji;
+        });
         dom.emojiPicker.appendChild(span);
     });
 
     dom.attachBtn.addEventListener('click', (e) => { e.stopPropagation(); dom.emojiPicker.classList.add('hidden'); dom.attachMenu.classList.toggle('hidden'); });
     dom.emojiBtn.addEventListener('click', (e) => { e.stopPropagation(); dom.attachMenu.classList.add('hidden'); dom.emojiPicker.classList.toggle('hidden'); });
+
+    // Send message listeners for both UIs
     dom.sendBtn.addEventListener('click', streamr.sendMessage);
     dom.messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); streamr.sendMessage(); } });
-    dom.messageInput.addEventListener('input', () => { if (!state.isTypingTimeout) streamr.sendTypingSignal(); else clearTimeout(state.isTypingTimeout); state.isTypingTimeout = setTimeout(() => { state.isTypingTimeout = null; }, config.TYPING_INDICATOR_TIMEOUT - 50); });
-    dom.messageInput.addEventListener('input', function () { this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px'; });
+    
+    dom.sendBtnStreamer.addEventListener('click', streamr.sendMessage);
+    dom.messageInputStreamer.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); streamr.sendMessage(); } });
+    
+
+    const typingHandler = () => {
+        if (!state.isTypingTimeout) {
+            streamr.sendTypingSignal();
+        } else {
+            clearTimeout(state.isTypingTimeout);
+        }
+        state.isTypingTimeout = setTimeout(() => { state.isTypingTimeout = null; }, config.TYPING_INDICATOR_TIMEOUT - 50);
+    };
+    dom.messageInput.addEventListener('input', typingHandler);
+    dom.messageInputStreamer.addEventListener('input', typingHandler);
+    
+    // Auto-resize textarea
+    const autoResizeHandler = function () {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    };
+    dom.messageInput.addEventListener('input', autoResizeHandler);
+    dom.messageInputStreamer.addEventListener('input', autoResizeHandler);
+    
+    dom.chatOpacitySlider.addEventListener('input', (e) => {
+        // Convert hex #1b1b1b to rgb(27, 27, 27) and apply opacity
+        dom.streamerChatPanel.style.backgroundColor = `rgba(27, 27, 27, ${e.target.value / 100})`;
+    });
+    
+    // New listeners for streamer room controls
+    dom.backToLobbyBtn.addEventListener('click', () => streamr.switchRoom('Lobby'));
+    
+    dom.chatSettingsToggle.addEventListener('click', () => {
+        dom.chatSettingsContainer.classList.toggle('hidden');
+        dom.chatSettingsToggle.classList.toggle('rotate-180');
+    });
+
     dom.onlineHeader.addEventListener('click', (e) => { e.stopPropagation(); dom.usersList.classList.toggle('hidden'); dom.onlineHeader.querySelector('svg').classList.toggle('rotate-180'); });
     dom.aboutBtn.addEventListener('click', () => dom.aboutModal.classList.remove('hidden'));
     dom.closeModalBtn.addEventListener('click', () => dom.aboutModal.classList.add('hidden'));
@@ -270,27 +318,54 @@ function setupEventListeners() {
 
     function updateRoomCreationModal() {
         const isPFS = dom.pfsRoomCheckbox.checked;
+        const roomType = document.querySelector('input[name="roomType"]:checked').value;
+        
         dom.privateRoomCheckbox.disabled = isPFS;
         if (isPFS) dom.privateRoomCheckbox.checked = true;
-        dom.passwordContainer.classList.toggle('hidden', !dom.privateRoomCheckbox.checked);
+        
+        // Hide security options for streamer rooms as they are public by nature
+        dom.securityOptionsContainer.classList.toggle('hidden', roomType === 'streamer');
+
+        dom.passwordContainer.classList.toggle('hidden', !dom.privateRoomCheckbox.checked || roomType === 'streamer');
     }
     dom.privateRoomCheckbox.addEventListener('change', updateRoomCreationModal);
     dom.pfsRoomCheckbox.addEventListener('change', updateRoomCreationModal);
+    document.querySelectorAll('input[name="roomType"]').forEach(radio => {
+        radio.addEventListener('change', updateRoomCreationModal);
+    });
+
 
     dom.createRoomBtn.addEventListener('click', async () => {
         const newRoomName = dom.newRoomInput.value.trim();
         if (!newRoomName) return;
-        const isPrivate = dom.privateRoomCheckbox.checked;
+    
+        const roomType = document.querySelector('input[name="roomType"]:checked').value;
+        const isPrivate = roomType !== 'streamer' && dom.privateRoomCheckbox.checked;
+        const isPFS = roomType !== 'streamer' && dom.pfsRoomCheckbox.checked;
+    
         if (isPrivate) {
             const password = dom.roomPasswordInput.value;
             if (!password) { ui.showCustomAlert('Password Required', 'Please enter a password.'); return; }
             state.roomPasswords.set(newRoomName, password);
         }
-        if (dom.pfsRoomCheckbox.checked) state.roomSettings.set(newRoomName, {isPFS: true});
+    
+        const roomSettings = { isPFS, roomType };
+        state.roomSettings.set(newRoomName, roomSettings);
+    
         await streamr.switchRoom(newRoomName);
-        dom.newRoomInput.value = ''; dom.roomPasswordInput.value = ''; dom.privateRoomCheckbox.checked = false;
+    
+        if (roomType === 'streamer' && state.myPublisherId) {
+             // Automatically trigger the go live flow for the creator
+            dom.streamSettingsModal.classList.remove('hidden');
+        }
+    
+        // Reset and close modal
+        dom.newRoomInput.value = '';
+        dom.roomPasswordInput.value = '';
+        dom.privateRoomCheckbox.checked = false;
         dom.pfsRoomCheckbox.checked = false;
-        dom.passwordContainer.classList.add('hidden');
+        document.querySelector('input[name="roomType"][value="chat"]').checked = true;
+        updateRoomCreationModal();
         dom.roomSelectionModal.classList.add('hidden');
     });
 

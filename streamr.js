@@ -15,11 +15,12 @@ import * as workers from './workers.js';
 // --- Handlers Internos de Mensagens ---
 
 async function handleLastMessagesPayload(payload, metadata) {
+    // MODIFIED: We no longer clear the entire chat history.
+    // We just process each message and let processAndDisplayMessage decide if it should be added.
     if (payload.Counter > state.messageCounter && payload.lastMessages) {
-        dom.messagesContainer.innerHTML = '';
         for (const msg of payload.lastMessages) {
             const msgMetadata = { publisherId: msg.userId, timestamp: msg.timestamp };
-            await processAndDisplayMessage(msg, msgMetadata, true);
+            await processAndDisplayMessage(msg, msgMetadata, true); // true for isHistorical
         }
         state.messageCounter = payload.Counter;
         state.lastMessages = payload.lastMessages;
@@ -44,6 +45,7 @@ async function handleLastMessagesPayload(payload, metadata) {
         ui.updateUserList(state.activeUsers, state.verifiedRealAddresses, utils.getDisplayName, utils.getUserColor);
     }
 }
+
 
 async function handleDataRequest(message) {
     if (message.roomId !== state.currentRoomId) return;
@@ -92,6 +94,27 @@ async function processAndDisplayMessage(message, metadata, isHistorical = false)
     }
 
     const originalMessageForHistory = {...message};
+    
+    const existingMsg = document.getElementById(`msg-${messageId}`);
+    if (existingMsg) {
+        // ADDED: More robust check. If a video message bubble already contains a video player,
+        // it means the file was downloaded/processed. We should never replace it.
+        if ((message.type === 'video_announce' || message.type === 'file_announce') && existingMsg.querySelector('video')) {
+            return;
+        }
+
+        const existingSeal = existingMsg.querySelector('.message-seal');
+        const isExistingHistorical = existingSeal && existingSeal.dataset.sealType === 'historical';
+
+        // If the new message is LIVE (!isHistorical) and the one on screen is HISTORICAL, we upgrade it.
+        if (!isHistorical && isExistingHistorical) {
+            existingMsg.remove(); // Remove the old one to replace it below.
+        } else {
+            // In all other cases (live/live, historical/historical, or historical trying to replace live),
+            // we do nothing.
+            return;
+        }
+    }
 
     if (message.type === 'pfs_encrypted') {
         if (state.currentEpochKey && message.epochId === state.currentEpochId) {
@@ -117,15 +140,7 @@ async function processAndDisplayMessage(message, metadata, isHistorical = false)
         const tempElement = document.getElementById(message.tempId);
         if (tempElement) tempElement.remove();
     }
-
-    const existingMsg = document.getElementById(`msg-${messageId}`);
-    if (existingMsg) {
-        const existingSeal = existingMsg.querySelector('.message-seal');
-        if (!isHistorical && existingSeal && existingSeal.dataset.sealType === 'historical') {
-            existingMsg.remove();
-        } else { return; }
-    }
-
+    
     if (message.realAddress) { state.userRealAddresses.set(metadata.publisherId, message.realAddress); }
     if (message.nickname) { const addressKey = state.userRealAddresses.get(metadata.publisherId) || metadata.publisherId; state.userNicknames.set(addressKey, utils.sanitizeHTML(message.nickname)); }
 
@@ -137,13 +152,30 @@ async function processAndDisplayMessage(message, metadata, isHistorical = false)
     if (message.type === 'start_stream') {
         if (message.streamType === 'audio') {
             state.remoteStreams.set(message.streamId, { audioContext: null });
-        } else { // 'video' ou legado
-            const canvas = document.getElementById(`stream-${message.streamId}`);
-            if (canvas) {
+        } else { // 'video' or legacy
+             const roomSettings = state.roomSettings.get(state.currentRoomId) || {};
+             if (roomSettings.roomType === 'streamer') {
+                // In streamer room, create the main canvas for the viewer
+                const canvas = document.createElement('canvas');
+                canvas.id = `stream-${message.streamId}`;
+                canvas.width = 854; 
+                canvas.height = 480;
+                canvas.className = 'bg-black rounded-md w-full h-auto'; 
+                dom.streamViewerPanel.innerHTML = ''; // Clear "Stream offline" message
+                dom.streamViewerPanel.appendChild(canvas);
+
                 const ctx = canvas.getContext('2d');
                 const videoWorker = workers.createVideoViewerWorker(ctx);
-                state.remoteStreams.set(message.streamId, {videoWorker, audioContext: null});
-            }
+                state.remoteStreams.set(message.streamId, { videoWorker, audioContext: null });
+             } else {
+                // In chat room, create the small canvas inside the message bubble
+                const canvas = document.getElementById(`stream-${message.streamId}`);
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    const videoWorker = workers.createVideoViewerWorker(ctx);
+                    state.remoteStreams.set(message.streamId, {videoWorker, audioContext: null});
+                }
+             }
         }
     } else if (message.type === 'image' && isHistorical) {
         requestData('image', message.imageId);
@@ -159,6 +191,10 @@ async function processAndDisplayMessage(message, metadata, isHistorical = false)
             if (streamInfo.audioContext) streamInfo.audioContext.close();
             if (streamInfo.videoWorker) streamInfo.videoWorker.terminate();
             state.remoteStreams.delete(message.streamId);
+        }
+        const roomSettings = state.roomSettings.get(state.currentRoomId) || {};
+        if (roomSettings.roomType === 'streamer') {
+            dom.streamViewerPanel.innerHTML = '<p class="text-gray-500 flex items-center justify-center h-full">Stream offline</p>';
         }
     }
 
@@ -599,7 +635,10 @@ export async function switchRoom(newRoomId) {
     if (state.rekeyInterval) clearInterval(state.rekeyInterval);
     state.rekeyInterval = null;
 
+    // Reset UI containers
     dom.messagesContainer.innerHTML = '';
+    dom.streamerChatContainer.innerHTML = ''; // Also clear streamer chat
+
     Object.assign(state, { 
         lastMessages: [], 
         activeUsers: new Map(),
@@ -620,6 +659,19 @@ export async function switchRoom(newRoomId) {
 
     state.currentRoomId = newRoomId;
     const currentRoomSettings = state.roomSettings.get(state.currentRoomId) || {};
+    const roomType = currentRoomSettings.roomType || 'chat';
+    state.currentRoomType = roomType;
+
+    // Toggle layouts based on room type
+    if (roomType === 'streamer') {
+        dom.chatUI.classList.add('hidden');
+        dom.streamerLayout.classList.remove('hidden');
+        dom.streamViewerPanel.innerHTML = '<p class="text-gray-500 flex items-center justify-center h-full">Stream offline</p>';
+    } else { // 'chat'
+        dom.streamerLayout.classList.add('hidden');
+        dom.chatUI.classList.remove('hidden');
+    }
+
     const isPrivate = state.roomPasswords.has(state.currentRoomId) || currentRoomSettings.isPFS;
     const isPFS = currentRoomSettings.isPFS;
     dom.chatTitle.textContent = newRoomId + (isPrivate ? ' 🔒' : '') + (isPFS ? ' 🛡️' : '');
@@ -637,9 +689,14 @@ export async function switchRoom(newRoomId) {
 }
 
 export async function sendMessage() {
-    const text = dom.messageInput.value.trim();
-    if (!text || !state.streamr || dom.sendBtn.disabled) return;
-    dom.sendBtn.disabled = true;
+    const input = state.currentRoomType === 'streamer' ? dom.messageInputStreamer : dom.messageInput;
+    const text = input.value.trim();
+    if (!text || !state.streamr) return;
+
+    const sendButton = state.currentRoomType === 'streamer' ? dom.sendBtnStreamer : dom.sendBtn;
+    if (sendButton.disabled) return;
+    sendButton.disabled = true;
+
     try {
         let messagePayload = { type: 'text', content: text, id: crypto.randomUUID(), nickname: state.myNickname, realAddress: state.myRealAddress };
         if (state.replyingTo) {
@@ -658,7 +715,7 @@ export async function sendMessage() {
                 finalPayload = { roomId: state.currentRoomId, type: 'pfs_encrypted', epochId: state.currentEpochId, ...encrypted };
             } else {
                 ui.showCustomAlert('Não Pronto', 'A aguardar pela chave de época segura...');
-                dom.sendBtn.disabled = false;
+                sendButton.disabled = false;
                 return;
             }
         } else if (password) {
@@ -669,8 +726,8 @@ export async function sendMessage() {
             finalPayload = {...messagePayload, roomId: state.currentRoomId};
         }
         await state.streamr.publish(config.CHAT_STREAM_ID, finalPayload);
-        dom.messageInput.value = '';
-        dom.messageInput.focus();
+        input.value = '';
+        input.focus();
         if (state.isTypingTimeout) clearTimeout(state.isTypingTimeout);
         state.isTypingTimeout = null;
         if (state.replyingTo) {
@@ -680,7 +737,7 @@ export async function sendMessage() {
     } catch (error) {
         ui.showCustomAlert('Erro', 'Falha ao enviar mensagem: ' + error.message);
     } finally {
-        dom.sendBtn.disabled = false;
+        sendButton.disabled = false;
     }
 }
 

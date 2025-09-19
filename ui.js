@@ -2,6 +2,7 @@
 
 import * as dom from './dom.js';
 import * as config from './config.js';
+import { state } from './state.js';
 
 // Note: Many functions now receive state (e.g., myPublisherId, activeUsers) 
 // and helper functions (e.g., getDisplayName) as parameters.
@@ -60,7 +61,9 @@ function createMessageTimestampHTML(timestamp, isHistorical, isOwn) {
 }
 
 export function addMessageToUI(msgDiv, isHistorical) {
-    const allMessages = dom.messagesContainer.querySelectorAll('.message-entry');
+    const container = state.currentRoomType === 'streamer' ? dom.streamerChatContainer : dom.messagesContainer;
+    
+    const allMessages = container.querySelectorAll('.message-entry');
     let referenceNode = null;
     const newTimestamp = parseInt(msgDiv.dataset.timestamp, 10);
 
@@ -72,14 +75,14 @@ export function addMessageToUI(msgDiv, isHistorical) {
         }
     }
 
-    dom.messagesContainer.insertBefore(msgDiv, referenceNode);
+    container.insertBefore(msgDiv, referenceNode);
 
     if (!isHistorical) {
-        dom.messagesContainer.scrollTop = dom.messagesContainer.scrollHeight;
+        container.scrollTop = container.scrollHeight;
     }
 
-    while (dom.messagesContainer.children.length > config.MAX_MESSAGES) {
-        dom.messagesContainer.removeChild(dom.messagesContainer.firstChild);
+    while (container.children.length > config.MAX_MESSAGES) {
+        container.removeChild(container.firstChild);
     }
 }
 
@@ -124,7 +127,10 @@ export function createMessageElement(message, metadata, isHistorical, helpers) {
         const receiverInteractionHTML = `<div id="file-interaction-${fileId}" class="flex flex-col items-start gap-y-1 mt-2">${isVideo ? playButton : downloadButton}<span class="seeder-count text-xs text-gray-500" data-file-id="${fileId}"></span></div>`;
         contentHTML = `<div class="file-container flex flex-col items-start gap-y-2"><div><div class="font-semibold">${sanitizeHTML(fileName)}</div><div class="text-xs text-gray-400">${(fileSize / 1024 / 1024).toFixed(2)} MB</div></div>${isOwnFile ? senderButton : receiverInteractionHTML}</div>`;
     } else if (message.type === 'start_stream') {
-        if (message.streamType === 'audio') {
+        if (state.currentRoomType === 'streamer' && message.streamType === 'video') {
+             // In streamer room, just show a notification, don't create a canvas here
+            contentHTML = `<div class="text-xs italic text-gray-500">Stream started.</div>`;
+        } else if (message.streamType === 'audio') {
             msgDiv.classList.add('message-entry-wide');
             contentHTML = `
                 <div class="stream-container audio-stream-container">
@@ -134,7 +140,7 @@ export function createMessageElement(message, metadata, isHistorical, helpers) {
                         <div class="audio-bar"></div><div class="audio-bar"></div>
                     </div>
                 </div>`;
-        } else { // Default to video
+        } else { // Default to video in a normal chat room
             msgDiv.classList.add('message-entry-wide');
             contentHTML = `<div class="stream-container"><div class="flex items-center">Live <span class="live-indicator"></span></div><canvas id="stream-${message.streamId}" width="854" height="480" class="bg-black rounded-md w-full h-auto"></canvas><button class="fullscreen-btn" data-stream-id="${message.streamId}"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m0 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5h-4m0 0v-4m0 4l-5-5"></path></svg></button></div>`;
         }
@@ -167,6 +173,14 @@ export function createMessageElement(message, metadata, isHistorical, helpers) {
 export function updateUserList(activeUsers, verifiedRealAddresses, getDisplayName, getUserColor) {
     dom.usersCounter.textContent = activeUsers.size;
     dom.usersList.innerHTML = '';
+
+    if (state.currentRoomType === 'streamer') {
+        const viewerCountElement = dom.viewerCounter.querySelector('span');
+        if (viewerCountElement) {
+            viewerCountElement.textContent = activeUsers.size;
+        }
+    }
+
     if (activeUsers.size > 0) {
         activeUsers.forEach((data, sessionId) => {
             const userColor = getUserColor(sessionId);
@@ -207,6 +221,8 @@ export function updateReactionsUI(messageId, messageReactions, myPublisherId) {
 export function updateTypingIndicatorUI(typingUsers, getDisplayName) {
     const now = Date.now();
     const typingNames = [];
+    const container = state.currentRoomType === 'streamer' ? dom.streamerChatContainer : dom.messagesContainer;
+
     for (const [userId, lastTyped] of typingUsers.entries()) {
         if (now - lastTyped < config.TYPING_INDICATOR_TIMEOUT) {
             typingNames.push(getDisplayName(userId));
@@ -226,7 +242,7 @@ export function updateTypingIndicatorUI(typingUsers, getDisplayName) {
         indicator = document.createElement('div');
         indicator.id = 'typing-indicator-bubble';
         indicator.className = 'message-entry other-message';
-        dom.messagesContainer.appendChild(indicator);
+        container.appendChild(indicator);
     }
 
     indicator.innerHTML = `
@@ -239,7 +255,7 @@ export function updateTypingIndicatorUI(typingUsers, getDisplayName) {
         </div>
     `;
 
-    dom.messagesContainer.scrollTop = dom.messagesContainer.scrollHeight;
+    container.scrollTop = container.scrollHeight;
 }
 
 
@@ -258,14 +274,20 @@ export function updateRoomListUI(activeRooms, roomSettings) {
         const currentRoomSettings = roomSettings.get(roomId) || {};
         const isPrivate = roomData.isPrivate || currentRoomSettings.isPFS;
         const isPFS = currentRoomSettings.isPFS;
+        const roomType = currentRoomSettings.roomType || 'chat';
 
         const lockIcon = isPrivate ? '🔒' : '';
         const securityIcon = isPFS ? '🛡️' : '';
+        const streamerBadge = roomType === 'streamer' ? '<span class="streamer-badge">LIVE</span>' : '';
+
 
         const roomItem = document.createElement('div');
         roomItem.className = 'bg-[#2a2a2a] p-3 rounded-lg flex justify-between items-center';
         roomItem.innerHTML = `
-            <span class="font-semibold truncate pr-2">${roomId} ${lockIcon}${securityIcon}</span>
+            <div class="flex items-center gap-x-2 truncate">
+                 <span class="font-semibold truncate pr-2">${roomId} ${lockIcon}${securityIcon}</span>
+                 ${streamerBadge}
+            </div>
             <div class="flex items-center gap-x-3 flex-shrink-0">
                 <span class="text-xs text-gray-400">${userCount} user(s)</span>
                 <button class="join-room-btn bg-gray-600 hover:bg-gray-700 text-sm py-1 px-3 rounded-md" data-room-id="${roomId}" data-is-private="${isPrivate}">Join</button>

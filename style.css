@@ -181,7 +181,7 @@ body {
     overflow-y: auto;
 }
 
-#messageInput {
+#messageInput, #messageInputStreamer {
     background-color: #1f1f1f;
     color: #e0e0e0;
     border: 1px solid #333;
@@ -189,7 +189,8 @@ body {
     scrollbar-width: none;
 }
 
-#messageInput::-webkit-scrollbar {
+#messageInput::-webkit-scrollbar,
+#messageInputStreamer::-webkit-scrollbar {
     display: none;
 }
 
@@ -476,111 +477,71 @@ canvas:-webkit-full-screen {
     background-color: black;
 }
 
-/* Tailwind base styles - included for completeness if not using the CDN in the future */
-*, ::before, ::after {
-    --tw-border-spacing-x: 0;
-    --tw-border-spacing-y: 0;
-    --tw-translate-x: 0;
-    --tw-translate-y: 0;
-    --tw-rotate: 0;
-    --tw-skew-x: 0;
-    --tw-skew-y: 0;
-    --tw-scale-x: 1;
-    --tw-scale-y: 1;
-    --tw-pan-x:;
-    --tw-pan-y:;
-    --tw-pinch-zoom:;
-    --tw-scroll-snap-strictness: proximity;
-    --tw-gradient-from-position:;
-    --tw-gradient-via-position:;
-    --tw-gradient-to-position:;
-    --tw-ordinal:;
-    --tw-slashed-zero:;
-    --tw-numeric-figure:;
-    --tw-numeric-spacing:;
-    --tw-numeric-fraction:;
-    --tw-ring-inset:;
-    --tw-ring-offset-width: 0px;
-    --tw-ring-offset-color: #fff;
-    --tw-ring-color: rgb(59 130 246 / 0.5);
-    --tw-ring-offset-shadow: 0 0 #0000;
-    --tw-ring-shadow: 0 0 #0000;
-    --tw-shadow: 0 0 #0000;
-    --tw-shadow-colored: 0 0 #0000;
-    --tw-blur:;
-    --tw-brightness:;
-    --tw-contrast:;
-    --tw-grayscale:;
-    --tw-hue-rotate:;
-    --tw-invert:;
-    --tw-saturate:;
-    --tw-sepia:;
-    --tw-drop-shadow:;
-    --tw-backdrop-blur:;
-    --tw-backdrop-brightness:;
-    --tw-backdrop-contrast:;
-    --tw-backdrop-grayscale:;
-    --tw-backdrop-hue-rotate:;
-    --tw-backdrop-invert:;
-    --tw-backdrop-opacity:;
-    --tw-backdrop-saturate:;
-    --tw-backdrop-sepia:;
-    --tw-contain-size:;
-    --tw-contain-layout:;
-    --tw-contain-paint:;
-    --tw-contain-style:
+/* --- Streamer Room & Direct Chat Styles --- */
+
+.streamer-badge {
+    background-color: #ef4444;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
 }
 
-::backdrop {
-    --tw-border-spacing-x: 0;
-    --tw-border-spacing-y: 0;
-    --tw-translate-x: 0;
-    --tw-translate-y: 0;
-    --tw-rotate: 0;
-    --tw-skew-x: 0;
-    --tw-skew-y: 0;
-    --tw-scale-x: 1;
-    --tw-scale-y: 1;
-    --tw-pan-x:;
-    --tw-pan-y:;
-    --tw-pinch-zoom:;
-    --tw-scroll-snap-strictness: proximity;
-    --tw-gradient-from-position:;
-    --tw-gradient-via-position:;
-    --tw-gradient-to-position:;
-    --tw-ordinal:;
-    --tw-slashed-zero:;
-    --tw-numeric-figure:;
-    --tw-numeric-spacing:;
-    --tw-numeric-fraction:;
-    --tw-ring-inset:;
-    --tw-ring-offset-width: 0px;
-    --tw-ring-offset-color: #fff;
-    --tw-ring-color: rgb(59 130 246 / 0.5);
-    --tw-ring-offset-shadow: 0 0 #0000;
-    --tw-ring-shadow: 0 0 #0000;
-    --tw-shadow: 0 0 #0000;
-    --tw-shadow-colored: 0 0 #0000;
-    --tw-blur:;
-    --tw-brightness:;
-    --tw-contrast:;
-    --tw-grayscale:;
-    --tw-hue-rotate:;
-    --tw-invert:;
-    --tw-saturate:;
-    --tw-sepia:;
-    --tw-drop-shadow:;
-    --tw-backdrop-blur:;
-    --tw-backdrop-brightness:;
-    --tw-backdrop-contrast:;
-    --tw-backdrop-grayscale:;
-    --tw-backdrop-hue-rotate:;
-    --tw-backdrop-invert:;
-    --tw-backdrop-opacity:;
-    --tw-backdrop-saturate:;
-    --tw-backdrop-sepia:;
-    --tw-contain-size:;
-    --tw-contain-layout:;
-    --tw-contain-paint:;
-    --tw-contain-style:
+/* Override default message styles for the direct-style chat */
+#streamerChatContainer .message-entry {
+    max-width: 100%;
+    margin-left: 0;
+    align-items: flex-start;
+    flex-direction: column; /* To stack user info and content */
+    margin-bottom: 0.5rem;
+    padding: 0;
 }
+
+#streamerChatContainer .own-message {
+    margin-left: 0; /* Override */
+    align-items: flex-start; /* Override */
+}
+
+#streamerChatContainer .message-bubble {
+    background-color: transparent;
+    border-radius: 0;
+    padding: 0;
+}
+
+/* Display user info and message content on the same line */
+#streamerChatContainer .user-info-header {
+    display: inline;
+    margin-right: 0.3rem;
+}
+
+#streamerChatContainer .user-info-header .verification-seal,
+#streamerChatContainer .user-info-header .font-mono {
+    display: none; /* Hide extra details for a cleaner look */
+}
+
+#streamerChatContainer .message-content {
+    display: inline;
+}
+
+/* Hide all the extra bubble elements for the direct chat */
+#streamerChatContainer .message-timestamp,
+#streamerChatContainer .message-actions,
+#streamerChatContainer .reactions-container,
+#streamerChatContainer .reply-snippet {
+    display: none;
+}
+
+#streamerChatContainer .message-bubble {
+    display: flex; /* Use flex to align user and message */
+    align-items: baseline;
+    flex-wrap: wrap;
+}
+
+#streamerChatContainer {
+    /* border-top: 1px solid #333;
+    /* background-color removed to allow parent panel's transparency to show through */
+    overflow-y: auto;
+}
+

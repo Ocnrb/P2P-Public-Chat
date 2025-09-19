@@ -29,9 +29,29 @@ export function createVideoViewerWorker(canvasContext) {
     const worker = new Worker(URL.createObjectURL(blob));
     worker.onmessage = (event) => {
         if (event.data.imageBitmap) {
-            canvasContext.clearRect(0, 0, canvasContext.canvas.width, canvasContext.canvas.height);
-            canvasContext.drawImage(event.data.imageBitmap, 0, 0, canvasContext.canvas.width, canvasContext.canvas.height);
-            event.data.imageBitmap.close();
+            const bitmap = event.data.imageBitmap;
+            const canvas = canvasContext.canvas;
+            
+            const videoRatio = bitmap.width / bitmap.height;
+            const canvasRatio = canvas.width / canvas.height;
+            let drawWidth, drawHeight, x, y;
+
+            // Calculate dimensions to maintain aspect ratio (letterboxing/pillarboxing)
+            if (videoRatio > canvasRatio) { 
+                drawWidth = canvas.width;
+                drawHeight = canvas.width / videoRatio;
+                x = 0;
+                y = (canvas.height - drawHeight) / 2;
+            } else {
+                drawHeight = canvas.height;
+                drawWidth = canvas.height * videoRatio;
+                y = 0;
+                x = (canvas.width - drawWidth) / 2;
+            }
+
+            canvasContext.clearRect(0, 0, canvas.width, canvas.height);
+            canvasContext.drawImage(bitmap, x, y, drawWidth, drawHeight);
+            bitmap.close();
         }
     };
     worker.onerror = (error) => {

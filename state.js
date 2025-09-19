@@ -4,8 +4,9 @@ export const state = {
     streamr: null,
     db: null,
     currentRoomId: 'Lobby',
+    currentRoomType: 'chat', // NEW: To track the current room's layout
     roomPasswords: new Map(),
-    roomSettings: new Map(),
+    roomSettings: new Map(), // Will now store { isPFS, roomType, streamerId }
     fileWorker: null,
     streamerWorker: null,
     myPublisherId: '',
@@ -56,4 +57,3 @@ export const state = {
         jpegQuality: 0.5
     }
 };
-
