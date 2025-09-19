@@ -93,6 +93,7 @@ export const streamViewerPanel = document.getElementById('streamViewerPanel');
 export const streamerChatPanel = document.getElementById('streamerChatPanel');
 export const streamerChatContainer = document.getElementById('streamerChatContainer');
 export const messageInputStreamer = document.getElementById('messageInputStreamer');
+export const emojiBtnStreamer = document.getElementById('emojiBtnStreamer');
 export const sendBtnStreamer = document.getElementById('sendBtnStreamer');
 export const chatOpacitySlider = document.getElementById('chatOpacitySlider');
 export const backToLobbyBtn = document.getElementById('backToLobbyBtn');
