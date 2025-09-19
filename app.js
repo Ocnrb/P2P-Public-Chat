@@ -1,4 +1,5 @@
 // app.js
+///
 
 import * as config from './config.js';
 import * as dom from './dom.js';
@@ -221,11 +222,18 @@ function setupEventListeners() {
     });
 
     dom.attachBtn.addEventListener('click', (e) => { e.stopPropagation(); dom.emojiPicker.classList.add('hidden'); dom.attachMenu.classList.toggle('hidden'); });
-    dom.emojiBtn.addEventListener('click', (e) => { e.stopPropagation(); dom.attachMenu.classList.add('hidden'); dom.emojiPicker.classList.toggle('hidden'); });
+    
+    // Unified emoji button handler
+    const emojiButtonHandler = (e) => {
+        e.stopPropagation();
+        dom.attachMenu.classList.add('hidden');
+        dom.emojiPicker.classList.toggle('hidden');
+    };
+    dom.emojiBtn.addEventListener('click', emojiButtonHandler);
     if (dom.emojiBtnStreamer) {
-        dom.emojiBtnStreamer.addEventListener('click', (e) => { e.stopPropagation(); dom.attachMenu.classList.add('hidden'); dom.emojiPicker.classList.toggle('hidden'); });
+        dom.emojiBtnStreamer.addEventListener('click', emojiButtonHandler);
     }
-
+    
     // Send message listeners for both UIs
     dom.sendBtn.addEventListener('click', streamr.sendMessage);
     dom.messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); streamr.sendMessage(); } });
@@ -393,9 +401,9 @@ function setupEventListeners() {
         const picker = document.getElementById('reactionPicker');
         if (picker && picker.style.display === 'flex' && !picker.contains(e.target) && !e.target.closest('.message-actions')) picker.style.display = 'none';
         if (!dom.onlineHeader.parentElement.contains(e.target) && !dom.usersList.classList.contains('hidden')) { dom.usersList.classList.add('hidden'); dom.onlineHeader.querySelector('svg').classList.remove('rotate-180'); }
-       if (!dom.emojiBtn.contains(e.target) && dom.emojiBtnStreamer && !dom.emojiBtnStreamer.contains(e.target) && !dom.emojiPicker.contains(e.target)) {
-dom.emojiPicker.classList.add('hidden');
-}
+       if (!e.target.closest('#emojiBtn') && !e.target.closest('#emojiBtnStreamer') && !dom.emojiPicker.contains(e.target)) {
+            dom.emojiPicker.classList.add('hidden');
+       }
         if (!dom.attachBtn.contains(e.target) && !dom.attachMenu.contains(e.target)) dom.attachMenu.classList.add('hidden');
     });
 
@@ -462,7 +470,3 @@ async function handlePageLoad() {
 }
 
 window.addEventListener('load', handlePageLoad);
-
-
-
-
